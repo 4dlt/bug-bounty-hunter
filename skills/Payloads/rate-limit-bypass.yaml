@@ -1,0 +1,179 @@
+# rate-limit-bypass.yaml — Rate limiting bypass techniques
+metadata:
+  version: "1.0"
+  sources:
+    - "AllAboutBugBounty/daffainfo"
+    - "PayloadsAllTheThings/Rate Limit"
+    - "Bug Bounty Tips"
+    - "HackerOne disclosed reports"
+  last_updated: "2026-03-27"
+
+# ──────────────────────────────────────────────
+# HEADER ROTATION (IP SPOOFING)
+# ──────────────────────────────────────────────
+
+header_rotation:
+  - name: x_forwarded_for_rotation
+    payload: "X-Forwarded-For: {RANDOM_IP}"
+    context: "Rotate this header with different IPs on each request"
+    notes: "If rate limit is based on X-Forwarded-For, rotating IPs bypasses it. Use random RFC 1918 or public IPs."
+
+  - name: x_forwarded_for_append
+    payload: "X-Forwarded-For: original_ip, {RANDOM_IP}"
+    context: "Append a new IP to existing X-Forwarded-For chain"
+    notes: "Some parsers take the last IP in the chain. Append different IPs."
+
+  - name: x_real_ip_rotation
+    payload: "X-Real-IP: {RANDOM_IP}"
+    context: "Rotate this header value per request"
+    notes: "Common header used by Nginx. If rate limit keys on this, rotation bypasses."
+
+  - name: x_client_ip_rotation
+    payload: "X-Client-IP: {RANDOM_IP}"
+    context: "Rotate this header value per request"
+    notes: "Less common but some apps use this for rate limit keying."
+
+  - name: x_originating_ip_rotation
+    payload: "X-Originating-IP: {RANDOM_IP}"
+    context: "Rotate this header value per request"
+    notes: "Another IP header that may be used for rate limiting."
+
+  - name: true_client_ip
+    payload: "True-Client-IP: {RANDOM_IP}"
+    context: "Rotate this header value per request"
+    notes: "Cloudflare and some CDNs use this header."
+
+  - name: cf_connecting_ip
+    payload: "CF-Connecting-IP: {RANDOM_IP}"
+    context: "Rotate this header value per request"
+    notes: "Cloudflare-specific header. Only works if app trusts it without validation."
+
+  - name: x_cluster_client_ip
+    payload: "X-Cluster-Client-IP: {RANDOM_IP}"
+    context: "Rotate this header value per request"
+    notes: "Used in clustered/load-balanced environments."
+
+  - name: forwarded_rfc7239
+    payload: "Forwarded: for={RANDOM_IP}"
+    context: "RFC 7239 standard forwarding header"
+    notes: "Newer standard format. Some apps implement this alongside X-Forwarded-For."
+
+  - name: all_headers_combined
+    payload: "Send all IP headers simultaneously with different random IPs"
+    context: "When unsure which header the app uses for rate limiting"
+    notes: "Include X-Forwarded-For, X-Real-IP, X-Client-IP, True-Client-IP, CF-Connecting-IP, Forwarded all at once."
+
+# ──────────────────────────────────────────────
+# PATH VARIATION
+# ──────────────────────────────────────────────
+
+path_variation:
+  - name: trailing_slash_toggle
+    payload: "Alternate between /api/login and /api/login/"
+    context: "Rate limited endpoint"
+    notes: "Path with and without trailing slash may be treated as different routes for rate limiting."
+
+  - name: case_variation
+    payload: "Alternate between /api/login, /API/LOGIN, /Api/Login"
+    context: "Rate limited endpoint on case-insensitive server"
+    notes: "If rate limit keys on exact path string but routing is case-insensitive."
+
+  - name: path_parameter_padding
+    payload: "/api/login, /api/./login, /api//login, /api/login;x=1"
+    context: "Rate limited endpoint"
+    notes: "Equivalent paths that may have different rate limit keys."
+
+  - name: url_encoding_variation
+    payload: "/api/%6cogin, /api/l%6fgin, /api/lo%67in"
+    context: "Rate limited endpoint"
+    notes: "Partially URL-encode the path. Rate limiter may not normalize before keying."
+
+  - name: http_method_variation
+    payload: "Try POST /api/login as PUT /api/login or PATCH /api/login"
+    context: "Rate limited endpoint that may accept alternative methods"
+    notes: "Rate limit may be per-method. Different method, same handler, different counter."
+
+  - name: query_parameter_variation
+    payload: "/api/login?x=1, /api/login?x=2, /api/login?y=1"
+    context: "Rate limited endpoint"
+    notes: "If rate limit includes query string in key, varying params creates different keys."
+
+  - name: content_type_variation
+    payload: "Alternate Content-Type between application/json, application/x-www-form-urlencoded, multipart/form-data"
+    context: "Rate limited POST endpoint"
+    notes: "Different content types may hit different middleware with separate rate limits."
+
+  - name: api_version_variation
+    payload: "/api/v1/login, /api/v2/login, /api/v3/login"
+    context: "API with multiple versions pointing to same handler"
+    notes: "Different API versions may have separate rate limit counters."
+
+# ──────────────────────────────────────────────
+# REQUEST MANIPULATION
+# ──────────────────────────────────────────────
+
+request_manipulation:
+  - name: null_byte_in_body
+    payload: "Add %00 or null bytes in request body parameters"
+    context: "Rate limited endpoint with body-based keying"
+    notes: "Null bytes may alter the key while server strips them before processing."
+
+  - name: unicode_variation
+    payload: "Use Unicode equivalents: email=vіctim@target.com (Cyrillic і instead of Latin i)"
+    context: "Rate limit keyed on parameter value like email"
+    notes: "Unicode normalization may treat look-alikes as same value but rate limiter sees different strings."
+
+  - name: whitespace_padding
+    payload: "Add spaces or tabs: email= victim@target.com, email=victim@target.com (trailing space)"
+    context: "Rate limit keyed on parameter value"
+    notes: "Leading/trailing whitespace may create different rate limit keys but server trims before use."
+
+  - name: parameter_pollution
+    payload: "email=victim@target.com&email=padding"
+    context: "Rate limit keyed on first parameter value"
+    notes: "HTTP Parameter Pollution. Server may use one value, rate limiter another."
+
+  - name: json_alternate_representation
+    payload: "Use {\"email\":\"victim@target.com\"} then {\"email\": \"victim@target.com\"} (extra space)"
+    context: "Rate limit that hashes raw request body"
+    notes: "Whitespace differences in JSON create different hashes but same parsed values."
+
+# ──────────────────────────────────────────────
+# TIMING & DISTRIBUTION
+# ──────────────────────────────────────────────
+
+timing_distribution:
+  - name: distributed_from_multiple_ips
+    payload: "Route requests through multiple proxies, VPNs, or cloud functions"
+    context: "Rate limit based on source IP"
+    notes: "Use multiple exit IPs: Tor, VPN rotation, cloud function regions, residential proxies."
+
+  - name: slow_rate_just_below_limit
+    payload: "Send requests at rate just below the detected threshold (e.g., 9/minute if limit is 10/minute)"
+    context: "Any rate limited endpoint"
+    notes: "Stay just under the limit for sustained access without triggering blocks."
+
+  - name: burst_at_window_boundary
+    payload: "Send N requests at end of rate limit window and N requests at start of next window"
+    context: "Rate limit with fixed time windows (e.g., per-minute)"
+    notes: "If window resets at minute boundary, 2x burst is possible across the boundary."
+
+  - name: race_condition_burst
+    payload: "Send 50+ concurrent requests simultaneously"
+    context: "Rate limit with race condition in counter increment"
+    notes: "If counter increment is not atomic, concurrent requests may all pass before limit is applied."
+
+  - name: cookie_session_rotation
+    payload: "Rotate session cookies or use no cookies between requests"
+    context: "Rate limit keyed on session/cookie"
+    notes: "Create new sessions for each batch of requests."
+
+  - name: user_agent_rotation
+    payload: "Rotate User-Agent header between requests"
+    context: "Rate limit that factors in User-Agent"
+    notes: "Some rate limiters include User-Agent in their key. Rotate through different browsers."
+
+  - name: origin_header_variation
+    payload: "Vary Origin header: https://target.com, https://www.target.com, null"
+    context: "Rate limit that includes Origin header in key"
+    notes: "Different Origin values may create different rate limit buckets."

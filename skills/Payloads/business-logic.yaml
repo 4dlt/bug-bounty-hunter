@@ -1,0 +1,162 @@
+# business-logic.yaml — Business logic vulnerability test cases
+metadata:
+  version: "1.0"
+  sources:
+    - "AllAboutBugBounty/daffainfo"
+    - "OWASP Business Logic Flaws"
+    - "PortSwigger Business Logic Labs"
+    - "Bug Bounty Bootcamp"
+  last_updated: "2026-03-27"
+
+# ──────────────────────────────────────────────
+# 9 CATEGORIES OF BUSINESS LOGIC TEST CASES
+# ──────────────────────────────────────────────
+
+price_manipulation:
+  - name: negative_price
+    payload: "POST /api/cart/add with body: {\"item_id\": 1, \"price\": -100.00}"
+    context: "E-commerce cart or payment endpoint"
+    notes: "Negative prices may credit the account. Test with -1, -0.01, negative quantities."
+
+  - name: zero_price
+    payload: "POST /api/cart/add with body: {\"item_id\": 1, \"price\": 0}"
+    context: "Cart or order endpoint where price is sent client-side"
+    notes: "Zero price may bypass payment entirely."
+
+  - name: decimal_manipulation
+    payload: "POST /api/cart/add with body: {\"item_id\": 1, \"price\": 0.001}"
+    context: "Payment processing with rounding"
+    notes: "Sub-cent values may round to zero but still process the order."
+
+  - name: currency_mismatch
+    payload: "POST /api/payment with body: {\"amount\": 100, \"currency\": \"IDR\"}"
+    context: "Payment endpoint that accepts currency parameter"
+    notes: "Pay in weaker currency while receiving goods priced in stronger currency."
+
+  - name: coupon_stacking
+    payload: "Apply same coupon code multiple times in separate requests before order is finalized"
+    context: "Coupon/discount application endpoint"
+    notes: "Race condition in coupon application may allow stacking. Also try applying after order total is calculated."
+
+quantity_manipulation:
+  - name: negative_quantity
+    payload: "POST /api/cart/update with body: {\"item_id\": 1, \"quantity\": -5}"
+    context: "Cart quantity update endpoint"
+    notes: "Negative quantity may reduce total or credit account."
+
+  - name: integer_overflow_quantity
+    payload: "POST /api/cart/update with body: {\"item_id\": 1, \"quantity\": 2147483647}"
+    context: "Cart with integer-based quantity"
+    notes: "Max int32 may cause overflow to negative number, reducing total."
+
+  - name: fractional_quantity
+    payload: "POST /api/cart/update with body: {\"item_id\": 1, \"quantity\": 0.0001}"
+    context: "Cart expecting integer quantity but accepting float"
+    notes: "Fractional quantity may round to 0 or 1, causing pricing discrepancy."
+
+workflow_bypass:
+  - name: skip_payment_step
+    payload: "After adding items to cart, directly call POST /api/orders/confirm without calling /api/payment"
+    context: "Multi-step checkout flow"
+    notes: "Skip payment step by directly hitting order confirmation endpoint."
+
+  - name: order_status_manipulation
+    payload: "PATCH /api/orders/ORDER_ID with body: {\"status\": \"completed\"}"
+    context: "Order management API where status is modifiable"
+    notes: "Change order status from 'pending_payment' to 'completed' or 'shipped'."
+
+  - name: reuse_completed_transaction
+    payload: "Replay the final POST /api/payment/confirm with same transaction ID"
+    context: "Payment confirmation endpoint without idempotency"
+    notes: "Replaying payment confirmation may duplicate goods/services received."
+
+  - name: modify_order_after_payment
+    payload: "After payment, call PUT /api/orders/ORDER_ID/items to add expensive items"
+    context: "Order modification endpoint that remains accessible after payment"
+    notes: "Add items to paid order. If no re-validation, items ship without payment."
+
+race_conditions:
+  - name: race_condition_balance
+    payload: "Send 50 concurrent POST /api/transfer with body: {\"amount\": 100, \"to\": \"attacker\"}"
+    context: "Fund transfer or wallet endpoint"
+    notes: "Race condition may allow spending more than available balance. Send all requests simultaneously."
+
+  - name: race_condition_redemption
+    payload: "Send 20 concurrent POST /api/coupon/redeem with body: {\"code\": \"SINGLE_USE\"}"
+    context: "Single-use coupon or gift card redemption"
+    notes: "Race condition may allow multiple redemptions of single-use code."
+
+  - name: race_condition_signup_bonus
+    payload: "Send 10 concurrent POST /api/register with same email but slight variations"
+    context: "Registration endpoint with signup bonus"
+    notes: "Multiple registrations may each receive signup bonus before dedup kicks in."
+
+privilege_escalation:
+  - name: role_parameter_manipulation
+    payload: "POST /api/register with body: {\"email\": \"a@b.com\", \"password\": \"pass\", \"role\": \"admin\"}"
+    context: "Registration endpoint that may accept role parameter"
+    notes: "Mass assignment vulnerability. Include role/is_admin/permissions in registration body."
+
+  - name: feature_flag_access
+    payload: "Access admin features by adding ?admin=true or X-Admin: true header"
+    context: "Application with feature flags checked client-side or via parameters"
+    notes: "Feature flags may be toggled via URL params, cookies, or headers."
+
+  - name: api_endpoint_guessing
+    payload: "Try /admin, /api/admin, /api/internal, /api/v1/admin/users, /debug, /graphql (introspection)"
+    context: "API with undocumented admin endpoints"
+    notes: "Admin endpoints may exist without authentication. Enumerate common paths."
+
+referral_abuse:
+  - name: self_referral
+    payload: "Use own referral code during registration (separate account/browser)"
+    context: "Referral program rewarding both referrer and referee"
+    notes: "Create multiple accounts using own referral code to accumulate rewards."
+
+  - name: referral_code_bruteforce
+    payload: "Enumerate referral codes if they are short/predictable: ABCD0001, ABCD0002, etc."
+    context: "Referral system with predictable codes"
+    notes: "Use discovered codes to claim referral bonuses."
+
+feature_abuse:
+  - name: free_trial_abuse
+    payload: "Create new account with disposable email after free trial expires"
+    context: "SaaS with email-based free trial tracking"
+    notes: "Use temp email services. Also try changing email on existing account to reset trial."
+
+  - name: export_data_excess
+    payload: "Call data export API with modified parameters to include all users' data"
+    context: "Data export endpoint with IDOR in user scope"
+    notes: "Export endpoints often return more data than intended when scope is manipulated."
+
+  - name: invite_privilege_escalation
+    payload: "Accept org invite, then modify own role via API before admin sets permissions"
+    context: "Organization invitation flow"
+    notes: "Race condition between invite acceptance and role assignment."
+
+rate_limit_abuse:
+  - name: sms_bombing
+    payload: "Repeatedly call POST /api/send-verification-sms with victim's phone number"
+    context: "SMS verification endpoint without per-number rate limiting"
+    notes: "No cost to attacker, charges target's phone bill, causes harassment."
+
+  - name: email_bombing
+    payload: "Repeatedly trigger password reset or notification emails for victim"
+    context: "Email-sending endpoints without per-recipient rate limiting"
+    notes: "Flood victim's inbox. May be used to bury important security notifications."
+
+data_integrity:
+  - name: negative_review_score
+    payload: "POST /api/reviews with body: {\"rating\": -5, \"product_id\": 1}"
+    context: "Review system accepting numeric ratings without bounds"
+    notes: "Negative ratings may corrupt averages or cause display errors."
+
+  - name: type_juggling
+    payload: "Send numeric field as string, string field as array, boolean as integer"
+    context: "API with weak type validation"
+    notes: "Type confusion may bypass validation. Try: {\"admin\": 1}, {\"admin\": [true]}, {\"price\": \"0\"}."
+
+  - name: unicode_normalization_abuse
+    payload: "Register username: admin (using Unicode look-alike characters like Cyrillic а instead of Latin a)"
+    context: "Username or unique field with Unicode support"
+    notes: "Unicode normalization may collapse look-alikes, causing collision with existing accounts."

