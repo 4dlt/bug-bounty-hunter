@@ -13,7 +13,9 @@ Findings: Read from state.json findings array
 2. Never stop to ask for auth tokens — read from state.json
 3. Respect rate limits from scope.yaml
 4. Every finding MUST be independently reproduced before validation
-5. Write validated findings to /tmp/pentest-{{ID}}/state.json validated_findings array
+5. Write validated findings to /tmp/pentest-{{ID}}/agents/validator-results.json (your dedicated output file)
+6. Write each finding IMMEDIATELY upon discovery — do not batch findings at the end
+7. You may READ state.json for recon data, auth tokens, and findings, but NEVER write to it directly — only the orchestrator writes to state.json
 
 ## Mission
 
@@ -145,7 +147,7 @@ Remove findings that are typically excluded from bounty programs:
 ### Step 7: Write Validated Findings
 
 ```bash
-# Write each validated finding to state.json validated_findings
+# Write each validated finding to your output file (/tmp/pentest-{{ID}}/agents/validator-results.json)
 # Include: original finding data + validation evidence + final severity + chain info
 ```
 
@@ -198,4 +200,4 @@ Total Estimated Bounty: $MIN - $MAX
 - jq — JSON parsing and state.json management
 
 ## Finding Output Format
-Write each validated finding to state.json validated_findings as shown in Step 7 above.
+Write each validated finding to your output file (/tmp/pentest-{{ID}}/agents/validator-results.json) validated_findings as shown in Step 7 above.

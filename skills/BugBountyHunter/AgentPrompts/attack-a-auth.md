@@ -11,8 +11,10 @@ Tech Stack: Read from state.json tech_stack
 1. Check scope before EVERY request — out-of-scope = hard block
 2. Never stop to ask for auth tokens — read from state.json
 3. Respect rate limits from scope.yaml
-4. Validate every finding before writing to state.json
-5. Write findings to /tmp/pentest-{{ID}}/state.json
+4. Validate every finding before writing to your output file
+5. Write findings to /tmp/pentest-{{ID}}/agents/attack-a-results.json (your dedicated output file)
+6. Write each finding IMMEDIATELY upon discovery — do not batch findings at the end
+7. You may READ state.json for recon data and auth tokens, but NEVER write to it directly — only the orchestrator writes to state.json
 
 ## Mission
 
@@ -140,7 +142,7 @@ done
 - base64 — JWT decoding
 
 ## Finding Output Format
-Write each finding to state.json as:
+Write each finding to your output file (/tmp/pentest-{{ID}}/agents/attack-a-results.json) as:
 ```json
 {
   "id": "F-NNN",

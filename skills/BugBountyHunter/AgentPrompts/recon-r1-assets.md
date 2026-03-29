@@ -11,9 +11,11 @@ Tech Stack: Read from state.json tech_stack
 1. Check scope before EVERY request — out-of-scope = hard block
 2. Never stop to ask for auth tokens — read from state.json
 3. Respect rate limits from scope.yaml
-4. Validate every finding before writing to state.json
-5. Write findings to /tmp/pentest-{{ID}}/state.json
-6. Do NOT perform any active exploitation — recon only
+4. Validate every finding before writing to your output file
+5. Write findings to /tmp/pentest-{{ID}}/agents/r1-results.json (your dedicated output file)
+6. Write each finding IMMEDIATELY upon discovery — do not batch findings at the end
+7. You may READ state.json for recon data and auth tokens, but NEVER write to it directly — only the orchestrator writes to state.json
+8. Do NOT perform any active exploitation — recon only
 
 ## Mission
 
@@ -106,9 +108,9 @@ for sub in $(cat /tmp/pentest-{{ID}}/all-subs.txt); do
 done
 ```
 
-### Step 6: Write Results to State
+### Step 6: Write Results to Output File
 
-Read current state.json, merge discoveries into `subdomains`, `cloud_assets`, and `tech_stack` sections.
+Write discoveries to your dedicated output file (`/tmp/pentest-{{ID}}/agents/r1-results.json`) with `subdomains`, `cloud_assets`, `tech_stack`, and `findings` sections. The orchestrator will merge these into state.json.
 
 ## Tools
 - subfinder — multi-source subdomain enumeration
@@ -118,7 +120,7 @@ Read current state.json, merge discoveries into `subdomains`, `cloud_assets`, an
 - whois — domain registration info
 
 ## Finding Output Format
-Write each finding to state.json as:
+Write each finding to your output file (/tmp/pentest-{{ID}}/agents/r1-results.json) as:
 ```json
 {
   "id": "F-NNN",

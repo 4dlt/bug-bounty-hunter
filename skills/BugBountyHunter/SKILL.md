@@ -45,6 +45,7 @@ pentest target.com scope=*.target.com creds=user:pass@https://target.com/login p
 PENTEST_ID="pentest-$(date +%Y%m%d-%H%M%S)"
 WORKDIR="/tmp/${PENTEST_ID}"
 mkdir -p "${WORKDIR}"
+mkdir -p "${WORKDIR}/agents"
 ```
 
 ---
@@ -127,7 +128,8 @@ testing_hours: "24/7"
   "cloud_assets": [],
   "parameters": [],
   "findings": [],
-  "validated_findings": []
+  "validated_findings": [],
+  "agent_outputs_dir": "/tmp/pentest-{ID}/agents/"
 }
 ```
 
@@ -140,13 +142,17 @@ testing_hours: "24/7"
 
 ---
 
-## Phase 1 — Recon (3 Parallel Agents)
+## Phase 1 — Recon (3 Agents, Batched)
 
 **Purpose:** Map the attack surface comprehensively before testing.
 
-Spawn 3 parallel agents using the Agent tool. Each agent gets scope.yaml and state.json path injected into its prompt template.
+**CRITICAL: Spawn max 2 agents per batch.** Launching 3+ concurrent agents causes ECONNRESET (API connection reset) due to concurrent streaming connection limits. Always batch and wait.
 
-### Agent R1: Subdomain & Asset Discovery
+Each agent gets scope.yaml and state.json path injected into its prompt template.
+
+### Batch 1 (spawn together):
+
+**Agent R1: Subdomain & Asset Discovery**
 ```
 Read AgentPrompts/recon-r1-assets.md
 Inject: TARGET={target}, ID={pentest_id}
@@ -154,7 +160,7 @@ Launch via Agent tool
 ```
 **References:** `~/.claude/skills/Security/Recon/SKILL.md` (DomainRecon, CloudAssetDiscovery workflows)
 
-### Agent R2: Content & API Discovery
+**Agent R2: Content & API Discovery**
 ```
 Read AgentPrompts/recon-r2-content.md
 Inject: TARGET={target}, ID={pentest_id}
@@ -162,7 +168,27 @@ Launch via Agent tool
 ```
 **References:** `~/.claude/skills/Security/Recon/SKILL.md` (JsAnalysis, HistoricalUrls workflows)
 
-### Agent R3: Tech Fingerprinting & Vulnerability Scanning
+### Wait for Batch 1 to return, then merge agent output files into state.json:
+
+```bash
+# After Batch 1 (R1, R2):
+for agent_file in "${WORKDIR}/agents/r1-results.json" "${WORKDIR}/agents/r2-results.json"; do
+  if [ -f "$agent_file" ]; then
+    jq -s '.[0] * {
+      subdomains: (.[0].subdomains + (.[1].subdomains // []) | unique),
+      discovered_endpoints: (.[0].discovered_endpoints + (.[1].discovered_endpoints // []) | unique_by(.url)),
+      tech_stack: (.[0].tech_stack * (.[1].tech_stack // {})),
+      cloud_assets: (.[0].cloud_assets + (.[1].cloud_assets // []) | unique_by(.url)),
+      js_endpoints: (.[0].js_endpoints + (.[1].js_endpoints // []) | unique)
+    }' "${WORKDIR}/state.json" "$agent_file" > "${WORKDIR}/state.tmp" \
+      && mv "${WORKDIR}/state.tmp" "${WORKDIR}/state.json"
+  fi
+done
+```
+
+### Batch 2 (spawn after Batch 1 completes):
+
+**Agent R3: Tech Fingerprinting & Vulnerability Scanning**
 ```
 Read AgentPrompts/recon-r3-fingerprint.md
 Inject: TARGET={target}, ID={pentest_id}
@@ -170,8 +196,25 @@ Launch via Agent tool
 ```
 **References:** `~/.claude/skills/Security/Recon/SKILL.md` (DorkGeneration workflow), `~/.claude/skills/DastAutomation/SKILL.md`
 
-### After all 3 return:
-1. Read state.json — merge all recon data
+### After R3 returns:
+
+```bash
+# After Batch 2 (R3):
+agent_file="${WORKDIR}/agents/r3-results.json"
+if [ -f "$agent_file" ]; then
+  jq -s '.[0] * {
+    subdomains: (.[0].subdomains + (.[1].subdomains // []) | unique),
+    discovered_endpoints: (.[0].discovered_endpoints + (.[1].discovered_endpoints // []) | unique_by(.url)),
+    tech_stack: (.[0].tech_stack * (.[1].tech_stack // {})),
+    cloud_assets: (.[0].cloud_assets + (.[1].cloud_assets // []) | unique_by(.url)),
+    js_endpoints: (.[0].js_endpoints + (.[1].js_endpoints // []) | unique),
+    findings: (.[0].findings + (.[1].findings // []))
+  }' "${WORKDIR}/state.json" "$agent_file" > "${WORKDIR}/state.tmp" \
+    && mv "${WORKDIR}/state.tmp" "${WORKDIR}/state.json"
+fi
+```
+
+1. Read state.json — review merged recon data
 2. Display recon summary:
    - Subdomain count
    - Live host count
@@ -180,6 +223,9 @@ Launch via Agent tool
    - Cloud assets found
    - Notable findings (open buckets, exposed admin panels, etc.)
 3. Update state.json status to `phase-1-complete`
+
+### On ECONNRESET failure:
+If any agent fails with ECONNRESET, retry it **alone** (no parallel agents) after a 10-second wait.
 
 ---
 
@@ -233,76 +279,136 @@ Update state.json auth section with extracted tokens, cookies, CSRF.
 
 ---
 
-## Phase 2b — Attack (8 Parallel Agents)
+## Phase 2b — Attack (8 Agents, Batched in Pairs)
 
 **Purpose:** Systematic vulnerability discovery across all attack classes.
+
+**CRITICAL: Spawn max 2 agents per batch.** Launching 3+ concurrent agents causes ECONNRESET (API connection reset). Batch in pairs, wait for each pair to return and merge results before spawning the next pair.
 
 Before spawning agents, use WebSearch to pull latest CVEs and bypasses for the detected tech stack:
 ```
 WebSearch: "latest CVE {tech_stack.framework} {tech_stack.server} 2026 bypass"
 ```
 
-Spawn 8 parallel agents. Each receives: scope.yaml path, state.json path (with auth, endpoints, tech stack).
+Each agent receives: scope.yaml path, state.json path (with auth, endpoints, tech stack).
 
-### Agent A: Auth & Session Testing
+### Batch 1 — High-value auth/access (spawn together):
+
+**Agent A: Auth & Session Testing**
 ```
 Read AgentPrompts/attack-a-auth.md
 Inject: TARGET, ID
 ```
 **References:** `~/.claude/skills/Security/Payloads/auth-bypass.yaml`
 
-### Agent B: Access Control / IDOR
+**Agent B: Access Control / IDOR**
 ```
 Read AgentPrompts/attack-b-idor.md
 Inject: TARGET, ID
 ```
 **References:** `~/.claude/skills/IdorPentest/SKILL.md` (16-layer attack matrix), `~/.claude/skills/Security/Payloads/idor.yaml`
 
-### Agent C: Injection (SQLi, XSS, SSTI, Command Injection)
+### Wait for Batch 1 → merge agent output files into state.json:
+
+```bash
+for agent_file in "${WORKDIR}/agents/attack-a-results.json" "${WORKDIR}/agents/attack-b-results.json"; do
+  if [ -f "$agent_file" ]; then
+    jq -s '.[0] * {findings: (.[0].findings + (.[1].findings // []))}' \
+      "${WORKDIR}/state.json" "$agent_file" > "${WORKDIR}/state.tmp" \
+      && mv "${WORKDIR}/state.tmp" "${WORKDIR}/state.json"
+  fi
+done
+```
+
+### Batch 2 — Injection/SSRF (spawn together):
+
+**Agent C: Injection (SQLi, XSS, SSTI, Command Injection)**
 ```
 Read AgentPrompts/attack-c-injection.md
 Inject: TARGET, ID
 ```
 **References:** `~/.claude/skills/Security/Payloads/xss.yaml`, `sqli.yaml`, `ssti.yaml`
 
-### Agent D: SSRF & Network
+**Agent D: SSRF & Network**
 ```
 Read AgentPrompts/attack-d-ssrf.md
 Inject: TARGET, ID
 ```
 **References:** `~/.claude/skills/Security/Payloads/ssrf.yaml`
 
-### Agent E: Business Logic & Race Conditions
+### Wait for Batch 2 → merge agent output files into state.json:
+
+```bash
+for agent_file in "${WORKDIR}/agents/attack-c-results.json" "${WORKDIR}/agents/attack-d-results.json"; do
+  if [ -f "$agent_file" ]; then
+    jq -s '.[0] * {findings: (.[0].findings + (.[1].findings // []))}' \
+      "${WORKDIR}/state.json" "$agent_file" > "${WORKDIR}/state.tmp" \
+      && mv "${WORKDIR}/state.tmp" "${WORKDIR}/state.json"
+  fi
+done
+```
+
+### Batch 3 — Logic/API (spawn together):
+
+**Agent E: Business Logic & Race Conditions**
 ```
 Read AgentPrompts/attack-e-business-logic.md
 Inject: TARGET, ID
 ```
 **References:** `~/.claude/skills/Security/Payloads/business-logic.yaml`, `~/.claude/skills/Security/WebAssessment/SKILL.md` (Business Logic Checklist)
 
-### Agent F: API Deep Dive
+**Agent F: API Deep Dive**
 ```
 Read AgentPrompts/attack-f-api.md
 Inject: TARGET, ID
 ```
 **References:** `~/.claude/skills/ApiSecurity/SKILL.md` (OWASP API Top 10)
 
-### Agent G: File Upload & Deserialization
+### Wait for Batch 3 → merge agent output files into state.json:
+
+```bash
+for agent_file in "${WORKDIR}/agents/attack-e-results.json" "${WORKDIR}/agents/attack-f-results.json"; do
+  if [ -f "$agent_file" ]; then
+    jq -s '.[0] * {findings: (.[0].findings + (.[1].findings // []))}' \
+      "${WORKDIR}/state.json" "$agent_file" > "${WORKDIR}/state.tmp" \
+      && mv "${WORKDIR}/state.tmp" "${WORKDIR}/state.json"
+  fi
+done
+```
+
+### Batch 4 — File/WebSocket (spawn together):
+
+**Agent G: File Upload & Deserialization**
 ```
 Read AgentPrompts/attack-g-file-upload.md
 Inject: TARGET, ID
 ```
 
-### Agent H: WebSocket & Real-time
+**Agent H: WebSocket & Real-time**
 ```
 Read AgentPrompts/attack-h-websocket.md
 Inject: TARGET, ID
 ```
 
-### After all 8 return:
-1. Read state.json — merge all findings
+### After Batch 4 returns:
+
+```bash
+for agent_file in "${WORKDIR}/agents/attack-g-results.json" "${WORKDIR}/agents/attack-h-results.json"; do
+  if [ -f "$agent_file" ]; then
+    jq -s '.[0] * {findings: (.[0].findings + (.[1].findings // []))}' \
+      "${WORKDIR}/state.json" "$agent_file" > "${WORKDIR}/state.tmp" \
+      && mv "${WORKDIR}/state.tmp" "${WORKDIR}/state.json"
+  fi
+done
+```
+
+1. Read state.json — review merged findings from all 4 batches
 2. Deduplicate findings by endpoint + vulnerability class
 3. Display attack summary: finding count by agent, severity distribution
 4. Update state.json status to `phase-2b-complete`
+
+### On ECONNRESET failure:
+If any agent fails with ECONNRESET, retry it **alone** (no parallel agents) after a 10-second wait. Do not abandon the agent — its coverage matters.
 
 ---
 
@@ -331,7 +437,18 @@ The validator agent:
    - **P4** ($100-$500): Self-XSS requiring social engineering, low-impact CSRF
    - **P5** (informational): Missing headers, verbose errors, no real impact
 4. **Filters** — drops anything below P3 unless it chains to higher severity
-5. Writes validated findings to state.json `validated_findings` array
+5. Writes validated findings to `/tmp/pentest-{ID}/agents/validator-results.json`
+
+After the validator returns, the orchestrator merges validated_findings into state.json:
+
+```bash
+agent_file="${WORKDIR}/agents/validator-results.json"
+if [ -f "$agent_file" ]; then
+  jq -s '.[0] * {validated_findings: (.[0].validated_findings + (.[1].validated_findings // []))}' \
+    "${WORKDIR}/state.json" "$agent_file" > "${WORKDIR}/state.tmp" \
+    && mv "${WORKDIR}/state.tmp" "${WORKDIR}/state.json"
+fi
+```
 
 ---
 

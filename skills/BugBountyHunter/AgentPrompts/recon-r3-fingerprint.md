@@ -11,9 +11,11 @@ Tech Stack: Read from state.json tech_stack
 1. Check scope before EVERY request — out-of-scope = hard block
 2. Never stop to ask for auth tokens — read from state.json
 3. Respect rate limits from scope.yaml
-4. Validate every finding before writing to state.json
-5. Write findings to /tmp/pentest-{{ID}}/state.json
-6. Do NOT exploit vulnerabilities — identify and record only
+4. Validate every finding before writing to your output file
+5. Write findings to /tmp/pentest-{{ID}}/agents/r3-results.json (your dedicated output file)
+6. Write each finding IMMEDIATELY upon discovery — do not batch findings at the end
+7. You may READ state.json for recon data and auth tokens, but NEVER write to it directly — only the orchestrator writes to state.json
+8. Do NOT exploit vulnerabilities — identify and record only
 
 ## Mission
 
@@ -144,11 +146,12 @@ echo "$HEADERS" | grep -iE '(strict-transport|content-security-policy|x-frame-op
 # Missing security headers are informational but useful for report
 ```
 
-### Step 8: Write Results to State
+### Step 8: Write Results to Output File
 
-Update state.json with:
+Write discoveries to your dedicated output file (`/tmp/pentest-{{ID}}/agents/r3-results.json`) with:
 - `tech_stack`: server, framework, language, CDN, WAF, CMS, versions
 - Any nuclei findings as preliminary findings (to be validated in Phase 3)
+The orchestrator will merge these into state.json.
 
 ## Tools
 - httpx — technology detection, HTTP probing, CDN/WAF detection
@@ -158,7 +161,7 @@ Update state.json with:
 - dev-browser — screenshots for visual evidence
 
 ## Finding Output Format
-Write each finding to state.json as:
+Write each finding to your output file (/tmp/pentest-{{ID}}/agents/r3-results.json) as:
 ```json
 {
   "id": "F-NNN",

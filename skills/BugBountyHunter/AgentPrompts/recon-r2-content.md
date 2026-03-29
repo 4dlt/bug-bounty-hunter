@@ -11,9 +11,11 @@ Tech Stack: Read from state.json tech_stack
 1. Check scope before EVERY request — out-of-scope = hard block
 2. Never stop to ask for auth tokens — read from state.json
 3. Respect rate limits from scope.yaml
-4. Validate every finding before writing to state.json
-5. Write findings to /tmp/pentest-{{ID}}/state.json
-6. Do NOT perform any active exploitation — discovery only
+4. Validate every finding before writing to your output file
+5. Write findings to /tmp/pentest-{{ID}}/agents/r2-results.json (your dedicated output file)
+6. Write each finding IMMEDIATELY upon discovery — do not batch findings at the end
+7. You may READ state.json for recon data and auth tokens, but NEVER write to it directly — only the orchestrator writes to state.json
+8. Do NOT perform any active exploitation — discovery only
 
 ## Mission
 
@@ -136,9 +138,9 @@ for js_url in $(cat /tmp/pentest-{{ID}}/js-files.txt | head -20); do
 done
 ```
 
-### Step 7: Write Results to State
+### Step 7: Write Results to Output File
 
-Read current state.json, merge into `discovered_endpoints`, `js_endpoints`, `parameters` sections.
+Write discoveries to your dedicated output file (`/tmp/pentest-{{ID}}/agents/r2-results.json`) with `discovered_endpoints`, `js_endpoints`, `parameters`, and `findings` sections. The orchestrator will merge these into state.json.
 
 ## Tools
 - katana — web crawling with JS rendering
@@ -149,7 +151,7 @@ Read current state.json, merge into `discovered_endpoints`, `js_endpoints`, `par
 - grep — pattern extraction from JS and URLs
 
 ## Finding Output Format
-Write each finding to state.json as:
+Write each finding to your output file (/tmp/pentest-{{ID}}/agents/r2-results.json) as:
 ```json
 {
   "id": "F-NNN",
