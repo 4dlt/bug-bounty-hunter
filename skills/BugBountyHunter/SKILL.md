@@ -38,6 +38,34 @@ curl -s -o /dev/null -w "%{http_code}" https://api.anthropic.com/v1/messages
 
 Do NOT abandon an agent — its coverage matters. Every skipped agent is a blind spot in the assessment.
 
+## Agent Timeout Policy
+
+Agents are autonomous but not infinite. Apply these timeouts to prevent pipeline stalls:
+
+| Agent Type | Base Timeout | Hard Ceiling |
+|------------|-------------|--------------|
+| Recon (R1-R3) | 10 minutes | 15 minutes |
+| Attack (A-H) | max(10min, endpoint_count × 5s) | 30 minutes |
+| Validator | max(15min, finding_count × 2min) | 45 minutes |
+
+**Activity monitoring:** After spawning each batch, check the agent output files every 3 minutes:
+```bash
+# Check if agent is still producing output
+LAST_MOD=$(stat -c %Y "${WORKDIR}/agents/${AGENT_ID}-results.json" 2>/dev/null || echo 0)
+NOW=$(date +%s)
+IDLE_SECONDS=$((NOW - LAST_MOD))
+if [ "$IDLE_SECONDS" -gt 180 ]; then
+  echo "[TIMEOUT WARNING] Agent ${AGENT_ID} idle for ${IDLE_SECONDS}s — may be stalled"
+fi
+```
+
+**On timeout:** Do NOT discard partial work. Because agents write findings incrementally (Rule 6), their output file already contains everything discovered so far. Merge what exists and log the gap:
+```bash
+echo "[TIMEOUT] Agent ${AGENT_ID} hit ${ELAPSED}min ceiling. Partial results merged." >> "${WORKDIR}/coverage-gaps.txt"
+```
+
+**Key dependency:** This policy requires agents to write findings immediately (Rule 6 from the behavioral rules). If an agent batches findings at the end, a timeout loses all work.
+
 ## Input Parsing
 
 Parse user input to extract engagement parameters.
@@ -178,6 +206,8 @@ Read AgentPrompts/recon-r1-assets.md
 Inject: TARGET={target}, ID={pentest_id}
 Launch via Agent tool
 ```
+Apply timeout per the **Agent Timeout Policy** above.
+
 **References:** `~/.claude/skills/Security/Recon/SKILL.md` (DomainRecon, CloudAssetDiscovery workflows)
 
 **Agent R2: Content & API Discovery**
@@ -186,6 +216,8 @@ Read AgentPrompts/recon-r2-content.md
 Inject: TARGET={target}, ID={pentest_id}
 Launch via Agent tool
 ```
+Apply timeout per the **Agent Timeout Policy** above.
+
 **References:** `~/.claude/skills/Security/Recon/SKILL.md` (JsAnalysis, HistoricalUrls workflows)
 
 ### Wait for Batch 1 to return, then merge agent output files into state.json:
@@ -214,6 +246,8 @@ Read AgentPrompts/recon-r3-fingerprint.md
 Inject: TARGET={target}, ID={pentest_id}
 Launch via Agent tool
 ```
+Apply timeout per the **Agent Timeout Policy** above.
+
 **References:** `~/.claude/skills/Security/Recon/SKILL.md` (DorkGeneration workflow), `~/.claude/skills/DastAutomation/SKILL.md`
 
 ### After R3 returns:
@@ -317,14 +351,20 @@ Each agent receives: scope.yaml path, state.json path (with auth, endpoints, tec
 ```
 Read AgentPrompts/attack-a-auth.md
 Inject: TARGET, ID
+Launch via Agent tool
 ```
+Apply timeout per the **Agent Timeout Policy** above.
+
 **References:** `~/.claude/skills/Security/Payloads/auth-bypass.yaml`
 
 **Agent B: Access Control / IDOR**
 ```
 Read AgentPrompts/attack-b-idor.md
 Inject: TARGET, ID
+Launch via Agent tool
 ```
+Apply timeout per the **Agent Timeout Policy** above.
+
 **References:** `~/.claude/skills/IdorPentest/SKILL.md` (16-layer attack matrix), `~/.claude/skills/Security/Payloads/idor.yaml`
 
 ### Wait for Batch 1 → merge agent output files into state.json:
@@ -345,14 +385,20 @@ done
 ```
 Read AgentPrompts/attack-c-injection.md
 Inject: TARGET, ID
+Launch via Agent tool
 ```
+Apply timeout per the **Agent Timeout Policy** above.
+
 **References:** `~/.claude/skills/Security/Payloads/xss.yaml`, `sqli.yaml`, `ssti.yaml`
 
 **Agent D: SSRF & Network**
 ```
 Read AgentPrompts/attack-d-ssrf.md
 Inject: TARGET, ID
+Launch via Agent tool
 ```
+Apply timeout per the **Agent Timeout Policy** above.
+
 **References:** `~/.claude/skills/Security/Payloads/ssrf.yaml`
 
 ### Wait for Batch 2 → merge agent output files into state.json:
@@ -373,14 +419,20 @@ done
 ```
 Read AgentPrompts/attack-e-business-logic.md
 Inject: TARGET, ID
+Launch via Agent tool
 ```
+Apply timeout per the **Agent Timeout Policy** above.
+
 **References:** `~/.claude/skills/Security/Payloads/business-logic.yaml`, `~/.claude/skills/Security/WebAssessment/SKILL.md` (Business Logic Checklist)
 
 **Agent F: API Deep Dive**
 ```
 Read AgentPrompts/attack-f-api.md
 Inject: TARGET, ID
+Launch via Agent tool
 ```
+Apply timeout per the **Agent Timeout Policy** above.
+
 **References:** `~/.claude/skills/ApiSecurity/SKILL.md` (OWASP API Top 10)
 
 ### Wait for Batch 3 → merge agent output files into state.json:
@@ -401,13 +453,17 @@ done
 ```
 Read AgentPrompts/attack-g-file-upload.md
 Inject: TARGET, ID
+Launch via Agent tool
 ```
+Apply timeout per the **Agent Timeout Policy** above.
 
 **Agent H: WebSocket & Real-time**
 ```
 Read AgentPrompts/attack-h-websocket.md
 Inject: TARGET, ID
+Launch via Agent tool
 ```
+Apply timeout per the **Agent Timeout Policy** above.
 
 ### After Batch 4 returns:
 
