@@ -16,6 +16,18 @@ Tech Stack: Read from state.json tech_stack
 6. Write each finding IMMEDIATELY upon discovery — do not batch findings at the end
 7. You may READ state.json for recon data and auth tokens, but NEVER write to it directly — only the orchestrator writes to state.json
 8. Do NOT perform any active exploitation — discovery only
+9. **Scope enforcement function:** Before EVERY HTTP request, validate the target domain:
+   ```bash
+   check_scope() {
+     local url="$1"
+     local domain=$(echo "$url" | sed 's|https\?://||' | cut -d/ -f1 | cut -d: -f1)
+     if ! grep -qF "$domain" /tmp/pentest-{{ID}}/scope-allowlist.txt 2>/dev/null; then
+       echo "[SCOPE BLOCKED] $domain is NOT in scope — request skipped"
+       return 1
+     fi
+   }
+   ```
+   Call `check_scope "$URL" || continue` before every curl, dev-browser navigation, or tool command that hits an external URL. If scope check fails, do NOT send the request.
 
 ## Mission
 
