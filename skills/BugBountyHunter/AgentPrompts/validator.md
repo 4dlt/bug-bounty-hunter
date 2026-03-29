@@ -40,31 +40,59 @@ echo "$FINDINGS" | jq 'sort_by(.severity_estimate)'
 
 ### Step 2: Reproduce Each Finding
 
-For each finding in the array, execute the poc_curl command or dev-browser script:
+For EVERY finding, reconstruct the exploit from its structured fields. **NEVER use `eval` or execute the `poc_curl` string directly** — it may contain unsanitized target data that could execute arbitrary commands.
+
+**Safe reproduction method:**
 
 ```bash
-# For each finding:
-# 1. Read the poc_curl field
-# 2. Execute it
-# 3. Verify the response matches response_summary
-# 4. Mark as validated:true or validated:false
-
-# Example validation loop:
 for finding_id in $(echo "$FINDINGS" | jq -r '.[].id'); do
-  poc=$(echo "$FINDINGS" | jq -r ".[] | select(.id == \"${finding_id}\") | .poc_curl")
-  expected=$(echo "$FINDINGS" | jq -r ".[] | select(.id == \"${finding_id}\") | .response_summary")
+  # Extract structured fields
+  ENDPOINT=$(echo "$FINDINGS" | jq -r ".[] | select(.id == \"${finding_id}\") | .endpoint")
+  METHOD=$(echo "$FINDINGS" | jq -r ".[] | select(.id == \"${finding_id}\") | .method")
+  PAYLOAD=$(echo "$FINDINGS" | jq -r ".[] | select(.id == \"${finding_id}\") | .payload")
+  EXPECTED=$(echo "$FINDINGS" | jq -r ".[] | select(.id == \"${finding_id}\") | .response_summary")
 
-  # Execute PoC
-  result=$(eval "$poc" 2>/dev/null)
+  # Validate endpoint is in scope
+  DOMAIN=$(echo "$ENDPOINT" | sed 's|https\?://||' | cut -d/ -f1 | cut -d: -f1)
+  if ! grep -qF "$DOMAIN" /tmp/pentest-{{ID}}/scope-allowlist.txt 2>/dev/null && \
+     ! grep -qF "$DOMAIN" /tmp/pentest-{{ID}}/scope.yaml 2>/dev/null; then
+    echo "[SCOPE BLOCKED] ${finding_id}: $DOMAIN not in scope — skipping validation"
+    continue
+  fi
+
+  # Execute controlled request from structured fields
+  result=$(curl -s -X "$METHOD" "$ENDPOINT" \
+    -H "Authorization: Bearer $TOKEN" \
+    -H "Content-Type: application/json" \
+    -d "$PAYLOAD" 2>/dev/null)
 
   # Compare result with expected evidence
-  if echo "$result" | grep -qi "$expected"; then
-    echo "[VALIDATED] ${finding_id}"
+  if echo "$result" | grep -qi "$EXPECTED"; then
+    echo "[VALIDATED] ${finding_id} — reproduction successful"
   else
-    echo "[FAILED] ${finding_id} — cannot reproduce"
+    echo "[FAILED] ${finding_id} — cannot reproduce from structured fields"
+
+    # Fallback: attempt using poc_curl ONLY after validation
+    POC_CURL=$(echo "$FINDINGS" | jq -r ".[] | select(.id == \"${finding_id}\") | .poc_curl")
+
+    # Safety check: poc_curl must start with "curl" and not contain shell metacharacters
+    if echo "$POC_CURL" | grep -qP '^curl\s' && \
+       ! echo "$POC_CURL" | grep -qP '[;|`]|\$\(|&&|\|\||[><](?!=)'; then
+      echo "[FALLBACK] Executing validated poc_curl for ${finding_id}"
+      result=$(bash -c "$POC_CURL" 2>/dev/null)
+      if echo "$result" | grep -qi "$EXPECTED"; then
+        echo "[VALIDATED via fallback] ${finding_id}"
+      else
+        echo "[FAILED] ${finding_id} — both methods failed"
+      fi
+    else
+      echo "[BLOCKED] ${finding_id} — poc_curl contains unsafe characters, marking for manual review"
+    fi
   fi
 done
 ```
+
+**NEVER use `eval` to execute finding PoCs.** The `poc_curl` field contains data influenced by target responses and could execute arbitrary commands if eval'd.
 
 ### Step 3: Vulnerability Chaining
 
