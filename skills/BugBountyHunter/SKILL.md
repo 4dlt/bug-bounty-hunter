@@ -263,6 +263,24 @@ for agent_file in "${WORKDIR}/agents/r1-results.json" "${WORKDIR}/agents/r2-resu
 done
 ```
 
+### Progress Report
+
+```bash
+FINDING_COUNT=$(jq '.findings | length' "${WORKDIR}/state.json" 2>/dev/null || echo 0)
+P1=$(jq '[.findings[] | select(.severity_estimate == "P1")] | length' "${WORKDIR}/state.json" 2>/dev/null || echo 0)
+P2=$(jq '[.findings[] | select(.severity_estimate == "P2")] | length' "${WORKDIR}/state.json" 2>/dev/null || echo 0)
+P3=$(jq '[.findings[] | select(.severity_estimate == "P3")] | length' "${WORKDIR}/state.json" 2>/dev/null || echo 0)
+ENDPOINT_COUNT=$(jq '.discovered_endpoints | length' "${WORKDIR}/state.json" 2>/dev/null || echo 0)
+SUB_COUNT=$(jq '.subdomains | length' "${WORKDIR}/state.json" 2>/dev/null || echo 0)
+
+echo "═══ Progress: Recon Batch 1/2 ══════════════════════"
+echo "  Agents completed: R1, R2"
+echo "  Subdomains: ${SUB_COUNT} | Endpoints: ${ENDPOINT_COUNT}"
+echo "  Findings: ${FINDING_COUNT} (${P1} P1, ${P2} P2, ${P3} P3)"
+echo "  Next: R3 fingerprinting"
+echo "═══════════════════════════════════════════════════════════"
+```
+
 ### Batch 2 (spawn after Batch 1 completes):
 
 **Agent R3: Tech Fingerprinting & Vulnerability Scanning**
@@ -291,6 +309,24 @@ if [ -f "$agent_file" ]; then
   }' "${WORKDIR}/state.json" "$agent_file" > "${WORKDIR}/state.tmp" \
     && mv "${WORKDIR}/state.tmp" "${WORKDIR}/state.json"
 fi
+```
+
+### Progress Report
+
+```bash
+FINDING_COUNT=$(jq '.findings | length' "${WORKDIR}/state.json" 2>/dev/null || echo 0)
+P1=$(jq '[.findings[] | select(.severity_estimate == "P1")] | length' "${WORKDIR}/state.json" 2>/dev/null || echo 0)
+P2=$(jq '[.findings[] | select(.severity_estimate == "P2")] | length' "${WORKDIR}/state.json" 2>/dev/null || echo 0)
+P3=$(jq '[.findings[] | select(.severity_estimate == "P3")] | length' "${WORKDIR}/state.json" 2>/dev/null || echo 0)
+ENDPOINT_COUNT=$(jq '.discovered_endpoints | length' "${WORKDIR}/state.json" 2>/dev/null || echo 0)
+SUB_COUNT=$(jq '.subdomains | length' "${WORKDIR}/state.json" 2>/dev/null || echo 0)
+
+echo "═══ Progress: Recon Batch 2/2 ══════════════════════"
+echo "  Agents completed: R3"
+echo "  Subdomains: ${SUB_COUNT} | Endpoints: ${ENDPOINT_COUNT}"
+echo "  Findings: ${FINDING_COUNT} (${P1} P1, ${P2} P2, ${P3} P3)"
+echo "  Next: Authentication (Phase 2)"
+echo "═══════════════════════════════════════════════════════════"
 ```
 
 1. Read state.json — review merged recon data
@@ -455,6 +491,24 @@ for agent_file in "${WORKDIR}/agents/attack-a-results.json" "${WORKDIR}/agents/a
 done
 ```
 
+### Progress Report
+
+```bash
+FINDING_COUNT=$(jq '.findings | length' "${WORKDIR}/state.json" 2>/dev/null || echo 0)
+P1=$(jq '[.findings[] | select(.severity_estimate == "P1")] | length' "${WORKDIR}/state.json" 2>/dev/null || echo 0)
+P2=$(jq '[.findings[] | select(.severity_estimate == "P2")] | length' "${WORKDIR}/state.json" 2>/dev/null || echo 0)
+P3=$(jq '[.findings[] | select(.severity_estimate == "P3")] | length' "${WORKDIR}/state.json" 2>/dev/null || echo 0)
+ENDPOINT_COUNT=$(jq '.discovered_endpoints | length' "${WORKDIR}/state.json" 2>/dev/null || echo 0)
+SUB_COUNT=$(jq '.subdomains | length' "${WORKDIR}/state.json" 2>/dev/null || echo 0)
+
+echo "═══ Progress: Attack Batch 1/4 ══════════════════════"
+echo "  Agents completed: A (auth), B (IDOR)"
+echo "  Subdomains: ${SUB_COUNT} | Endpoints: ${ENDPOINT_COUNT}"
+echo "  Findings: ${FINDING_COUNT} (${P1} P1, ${P2} P2, ${P3} P3)"
+echo "  Next: C (injection), D (SSRF)"
+echo "═══════════════════════════════════════════════════════════"
+```
+
 ### Auth Health Check
 
 Before spawning next batch, verify auth is still valid:
@@ -505,6 +559,24 @@ for agent_file in "${WORKDIR}/agents/attack-c-results.json" "${WORKDIR}/agents/a
       && mv "${WORKDIR}/state.tmp" "${WORKDIR}/state.json"
   fi
 done
+```
+
+### Progress Report
+
+```bash
+FINDING_COUNT=$(jq '.findings | length' "${WORKDIR}/state.json" 2>/dev/null || echo 0)
+P1=$(jq '[.findings[] | select(.severity_estimate == "P1")] | length' "${WORKDIR}/state.json" 2>/dev/null || echo 0)
+P2=$(jq '[.findings[] | select(.severity_estimate == "P2")] | length' "${WORKDIR}/state.json" 2>/dev/null || echo 0)
+P3=$(jq '[.findings[] | select(.severity_estimate == "P3")] | length' "${WORKDIR}/state.json" 2>/dev/null || echo 0)
+ENDPOINT_COUNT=$(jq '.discovered_endpoints | length' "${WORKDIR}/state.json" 2>/dev/null || echo 0)
+SUB_COUNT=$(jq '.subdomains | length' "${WORKDIR}/state.json" 2>/dev/null || echo 0)
+
+echo "═══ Progress: Attack Batch 2/4 ══════════════════════"
+echo "  Agents completed: C, D"
+echo "  Subdomains: ${SUB_COUNT} | Endpoints: ${ENDPOINT_COUNT}"
+echo "  Findings: ${FINDING_COUNT} (${P1} P1, ${P2} P2, ${P3} P3)"
+echo "  Next: E (business logic), F (API)"
+echo "═══════════════════════════════════════════════════════════"
 ```
 
 ### Auth Health Check
@@ -559,6 +631,24 @@ for agent_file in "${WORKDIR}/agents/attack-e-results.json" "${WORKDIR}/agents/a
 done
 ```
 
+### Progress Report
+
+```bash
+FINDING_COUNT=$(jq '.findings | length' "${WORKDIR}/state.json" 2>/dev/null || echo 0)
+P1=$(jq '[.findings[] | select(.severity_estimate == "P1")] | length' "${WORKDIR}/state.json" 2>/dev/null || echo 0)
+P2=$(jq '[.findings[] | select(.severity_estimate == "P2")] | length' "${WORKDIR}/state.json" 2>/dev/null || echo 0)
+P3=$(jq '[.findings[] | select(.severity_estimate == "P3")] | length' "${WORKDIR}/state.json" 2>/dev/null || echo 0)
+ENDPOINT_COUNT=$(jq '.discovered_endpoints | length' "${WORKDIR}/state.json" 2>/dev/null || echo 0)
+SUB_COUNT=$(jq '.subdomains | length' "${WORKDIR}/state.json" 2>/dev/null || echo 0)
+
+echo "═══ Progress: Attack Batch 3/4 ══════════════════════"
+echo "  Agents completed: E, F"
+echo "  Subdomains: ${SUB_COUNT} | Endpoints: ${ENDPOINT_COUNT}"
+echo "  Findings: ${FINDING_COUNT} (${P1} P1, ${P2} P2, ${P3} P3)"
+echo "  Next: G (file upload), H (WebSocket)"
+echo "═══════════════════════════════════════════════════════════"
+```
+
 ### Auth Health Check
 
 Before spawning next batch, verify auth is still valid:
@@ -605,6 +695,24 @@ for agent_file in "${WORKDIR}/agents/attack-g-results.json" "${WORKDIR}/agents/a
       && mv "${WORKDIR}/state.tmp" "${WORKDIR}/state.json"
   fi
 done
+```
+
+### Progress Report
+
+```bash
+FINDING_COUNT=$(jq '.findings | length' "${WORKDIR}/state.json" 2>/dev/null || echo 0)
+P1=$(jq '[.findings[] | select(.severity_estimate == "P1")] | length' "${WORKDIR}/state.json" 2>/dev/null || echo 0)
+P2=$(jq '[.findings[] | select(.severity_estimate == "P2")] | length' "${WORKDIR}/state.json" 2>/dev/null || echo 0)
+P3=$(jq '[.findings[] | select(.severity_estimate == "P3")] | length' "${WORKDIR}/state.json" 2>/dev/null || echo 0)
+ENDPOINT_COUNT=$(jq '.discovered_endpoints | length' "${WORKDIR}/state.json" 2>/dev/null || echo 0)
+SUB_COUNT=$(jq '.subdomains | length' "${WORKDIR}/state.json" 2>/dev/null || echo 0)
+
+echo "═══ Progress: Attack Batch 4/4 ══════════════════════"
+echo "  Agents completed: G, H"
+echo "  Subdomains: ${SUB_COUNT} | Endpoints: ${ENDPOINT_COUNT}"
+echo "  Findings: ${FINDING_COUNT} (${P1} P1, ${P2} P2, ${P3} P3)"
+echo "  Next: Validation (Phase 3)"
+echo "═══════════════════════════════════════════════════════════"
 ```
 
 1. Read state.json — review merged findings from all 4 batches
@@ -656,6 +764,24 @@ if [ -f "$agent_file" ]; then
     "${WORKDIR}/state.json" "$agent_file" > "${WORKDIR}/state.tmp" \
     && mv "${WORKDIR}/state.tmp" "${WORKDIR}/state.json"
 fi
+```
+
+### Progress Report
+
+```bash
+FINDING_COUNT=$(jq '.findings | length' "${WORKDIR}/state.json" 2>/dev/null || echo 0)
+P1=$(jq '[.findings[] | select(.severity_estimate == "P1")] | length' "${WORKDIR}/state.json" 2>/dev/null || echo 0)
+P2=$(jq '[.findings[] | select(.severity_estimate == "P2")] | length' "${WORKDIR}/state.json" 2>/dev/null || echo 0)
+P3=$(jq '[.findings[] | select(.severity_estimate == "P3")] | length' "${WORKDIR}/state.json" 2>/dev/null || echo 0)
+ENDPOINT_COUNT=$(jq '.discovered_endpoints | length' "${WORKDIR}/state.json" 2>/dev/null || echo 0)
+SUB_COUNT=$(jq '.subdomains | length' "${WORKDIR}/state.json" 2>/dev/null || echo 0)
+
+echo "═══ Progress: Validation complete ══════════════════════"
+echo "  Agents completed: Validator"
+echo "  Subdomains: ${SUB_COUNT} | Endpoints: ${ENDPOINT_COUNT}"
+echo "  Findings: ${FINDING_COUNT} (${P1} P1, ${P2} P2, ${P3} P3)"
+echo "  Next: Reporting (Phase 4)"
+echo "═══════════════════════════════════════════════════════════"
 ```
 
 ---
