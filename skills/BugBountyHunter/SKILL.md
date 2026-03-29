@@ -904,6 +904,28 @@ Ask if the user wants individual findings formatted for:
 
 ---
 
+## Phase 5 — Cleanup
+
+After the report is delivered:
+
+```bash
+# Scrub auth tokens from state.json (security hygiene)
+jq '.auth = {"authenticated": false, "scrubbed": true}' \
+  "${WORKDIR}/state.json" > "${WORKDIR}/state.tmp" && mv "${WORKDIR}/state.tmp" "${WORKDIR}/state.json"
+
+# Remove agent output files (findings already merged into state.json)
+rm -f "${WORKDIR}/agents/"*-results.json
+
+echo "[CLEANUP] Auth tokens scrubbed from state.json"
+echo "[CLEANUP] Agent output files removed"
+echo "[CLEANUP] Report preserved at: ${WORKDIR}/report.md"
+echo "[CLEANUP] State preserved at: ${WORKDIR}/state.json (tokens scrubbed)"
+```
+
+Ask user: "Delete the entire engagement directory (${WORKDIR})? Or keep for reference?"
+
+---
+
 ## Tool Check
 
 Before starting, verify tooling:

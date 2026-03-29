@@ -128,3 +128,14 @@ The orchestrator calls this module after Phase 1 recon completes (tech stack kno
 ## Key Principle
 
 Fresh intelligence > stale methodology. A CVE from last week that matches the target's exact software version is worth more than 100 generic test cases.
+
+## Fallback Behavior
+
+If any step fails (WebSearch unavailable, nuclei not installed, network error, timeout):
+
+1. Log the failure: `"[TechniqueFetcher] Step N failed: {error}. Continuing with remaining steps."`
+2. Return a partial result with whatever steps succeeded
+3. Set a flag in the output: `"fallback": true, "failed_steps": ["step_name1", "step_name2"]`
+4. The orchestrator and attack agents MUST still proceed — the static payloads in `skills/Payloads/` are comprehensive enough for a solid baseline engagement
+
+**NEVER block the attack pipeline because intelligence gathering failed.** Fresh intelligence is a force multiplier, not a prerequisite.

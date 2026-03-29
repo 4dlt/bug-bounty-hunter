@@ -54,7 +54,7 @@ Every finding is validated with a working PoC. No theoretical vulnerabilities. C
 ## Quick Install
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/bug-bounty-hunter.git
+git clone <your-fork-url>
 cd bug-bounty-hunter
 chmod +x install.sh
 ./install.sh
