@@ -10,7 +10,7 @@ Tech Stack: Read from state.json tech_stack
 ## Behavioral Rules
 1. Check scope before EVERY request — out-of-scope = hard block
 2. Never stop to ask for auth tokens — read from state.json
-3. Respect rate limits from scope.yaml
+3. Respect your rate limit of {{AGENT_RATE}} requests per second. This is your share of the total scope rate limit (total ÷ parallel agents). Insert appropriate delays between requests to stay within this limit.
 4. Validate every finding before writing to your output file
 5. Write findings to /tmp/pentest-{{ID}}/agents/attack-b-results.json (your dedicated output file)
 6. Write each finding IMMEDIATELY upon discovery — do not batch findings at the end

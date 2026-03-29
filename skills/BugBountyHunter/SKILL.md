@@ -181,6 +181,31 @@ testing_hours: "24/7"
 }
 ```
 
+### Generate Scope Allowlist
+
+Convert scope patterns into an explicit domain allowlist for agents:
+
+```bash
+# Build explicit allowlist from scope
+echo "{{TARGET}}" > "${WORKDIR}/scope-allowlist.txt"
+
+# Extract in-scope entries
+grep -A100 'in_scope:' "${WORKDIR}/scope.yaml" | grep '^ *-' | sed 's/.*- *"\(.*\)"/\1/' >> "${WORKDIR}/scope-allowlist.txt"
+
+echo "[SCOPE] Allowlist created with $(wc -l < "${WORKDIR}/scope-allowlist.txt") entries"
+```
+
+After Phase 1 recon completes, update the allowlist with discovered in-scope subdomains:
+
+```bash
+# Append discovered subdomains that match scope patterns
+if [ -f "${WORKDIR}/state.json" ]; then
+  jq -r '.subdomains[]' "${WORKDIR}/state.json" >> "${WORKDIR}/scope-allowlist.txt"
+  sort -u -o "${WORKDIR}/scope-allowlist.txt" "${WORKDIR}/scope-allowlist.txt"
+  echo "[SCOPE] Allowlist updated with discovered subdomains: $(wc -l < "${WORKDIR}/scope-allowlist.txt") entries"
+fi
+```
+
 5. Display scope summary and request user confirmation before proceeding.
 
 ### If no program URL:
@@ -384,6 +409,17 @@ WebSearch: "latest CVE {tech_stack.framework} {tech_stack.server} 2026 bypass"
 ```
 
 Each agent receives: scope.yaml path, state.json path (with auth, endpoints, tech stack).
+
+### Calculate Per-Agent Rate Limits
+
+```bash
+TOTAL_RATE=$(grep 'rate_limit:' "${WORKDIR}/scope.yaml" | awk '{print $2}')
+AGENTS_PER_BATCH=2
+AGENT_RATE=$((TOTAL_RATE / AGENTS_PER_BATCH))
+echo "[RATE] Total: ${TOTAL_RATE} req/s | Per agent: ${AGENT_RATE} req/s"
+```
+
+Inject `AGENT_RATE` into each agent prompt template alongside TARGET and ID.
 
 ### Batch 1 — High-value auth/access (spawn together):
 
