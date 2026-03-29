@@ -88,6 +88,31 @@ pentest target.com scope=*.target.com creds=user:pass@https://target.com/login p
 
 **Trigger words:** `pentest`, `bug bounty`, `security assessment`, `hack`, `find vulnerabilities`
 
+### Input Sanitization
+
+Validate and sanitize parsed inputs before injecting into agent prompts:
+
+```bash
+# Validate target doesn't contain shell metacharacters
+if echo "{{TARGET}}" | grep -qP '[;&|$`><]'; then
+  echo "[ERROR] Target contains shell metacharacters — aborting for safety"
+  echo "Target must be a clean domain or URL (e.g., target.com or https://target.com)"
+  # Stop execution
+fi
+
+# URL-encode target for safe use in curl commands
+TARGET_ENCODED=$(python3 -c "import urllib.parse; print(urllib.parse.quote('${TARGET}', safe='/:@'))" 2>/dev/null || echo "${TARGET}")
+
+# Escape credentials for shell safety (if provided)
+if [ -n "${CREDS}" ]; then
+  CREDS_USER=$(echo "${CREDS}" | cut -d: -f1 | sed "s/'/'\\\\''/g")
+  CREDS_PASS=$(echo "${CREDS}" | cut -d: -f2 | cut -d@ -f1 | sed "s/'/'\\\\''/g")
+  LOGIN_URL=$(echo "${CREDS}" | sed 's/.*@//')
+fi
+```
+
+Use `TARGET_ENCODED` in curl commands within agent prompts. Use `TARGET` for display and logging only.
+
 ```bash
 # Generate unique engagement ID
 PENTEST_ID="pentest-$(date +%Y%m%d-%H%M%S)"
