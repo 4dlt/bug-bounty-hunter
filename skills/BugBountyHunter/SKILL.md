@@ -18,6 +18,26 @@ Autonomous bug bounty pentesting system. Parses target and scope, runs parallel 
 7. **Be autonomous** — Only stop for truly ambiguous scope decisions. Everything else, handle yourself.
 8. **Prioritize depth over breadth** — One confirmed P2 beats ten unvalidated P4s.
 
+## Agent Failure Retry Protocol
+
+When any agent fails (ECONNRESET, timeout, or any spawn error), follow this graduated retry:
+
+**Retry 1:** Wait 15 seconds. Retry the failed agent ALONE (no parallel agents).
+**Retry 2:** Wait 30 seconds. Retry with a reduced prompt — remove Reference lines and tool descriptions, keep only the mission, methodology steps, and behavioral rules.
+**Retry 3:** Wait 60 seconds. Final retry with minimal prompt — mission and behavioral rules only.
+**Give up:** Log the coverage gap:
+```bash
+echo "[COVERAGE GAP] Agent ${AGENT_ID} failed after 4 attempts. Uncovered: ${AGENT_MISSION_SUMMARY}" >> "${WORKDIR}/coverage-gaps.txt"
+```
+
+**CRITICAL:** Between retries, verify your API connection before spawning:
+```bash
+curl -s -o /dev/null -w "%{http_code}" https://api.anthropic.com/v1/messages
+# If this returns 000 or fails, the network is down — wait longer before using a retry attempt
+```
+
+Do NOT abandon an agent — its coverage matters. Every skipped agent is a blind spot in the assessment.
+
 ## Input Parsing
 
 Parse user input to extract engagement parameters.
@@ -224,8 +244,7 @@ fi
    - Notable findings (open buckets, exposed admin panels, etc.)
 3. Update state.json status to `phase-1-complete`
 
-### On ECONNRESET failure:
-If any agent fails with ECONNRESET, retry it **alone** (no parallel agents) after a 10-second wait.
+If any agent fails, follow the **Agent Failure Retry Protocol** above.
 
 ---
 
@@ -407,8 +426,7 @@ done
 3. Display attack summary: finding count by agent, severity distribution
 4. Update state.json status to `phase-2b-complete`
 
-### On ECONNRESET failure:
-If any agent fails with ECONNRESET, retry it **alone** (no parallel agents) after a 10-second wait. Do not abandon the agent — its coverage matters.
+If any agent fails, follow the **Agent Failure Retry Protocol** above.
 
 ---
 
@@ -455,6 +473,20 @@ fi
 ## Phase 4 — Reporting
 
 **Purpose:** Generate bounty-ready report.
+
+### Include Coverage Gaps
+
+If `${WORKDIR}/coverage-gaps.txt` exists, append to the report:
+
+```markdown
+## Coverage Gaps
+
+The following test categories could not be completed due to agent failures:
+
+{contents of coverage-gaps.txt}
+
+These areas require manual testing or a re-run of the engagement.
+```
 
 ### Generate Report
 
