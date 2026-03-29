@@ -608,7 +608,11 @@ done
 ```
 
 1. Read state.json — review merged findings from all 4 batches
-2. Deduplicate findings by endpoint + vulnerability class
+2. Deduplicate findings using composite key `(normalized_path, parameter, vulnerability_class, payload_family)`:
+   - **Normalize paths:** strip API version prefixes (`/api/v1/users` and `/api/v2/users` → `/api/users`)
+   - **Same path + same parameter + same vuln class** = duplicate → keep higher severity
+   - **Same path + different parameters + same vuln class** = distinct findings → keep both
+   - **Different paths + same parameter + same vuln class + same response** = likely duplicate → merge, note both endpoints
 3. Display attack summary: finding count by agent, severity distribution
 4. Update state.json status to `phase-2b-complete`
 
