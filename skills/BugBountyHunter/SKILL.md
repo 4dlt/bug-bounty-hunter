@@ -326,6 +326,46 @@ EOF
 
 Update state.json auth section with extracted tokens, cookies, CSRF.
 
+### Verify Authentication
+
+After extracting auth artifacts, verify the session actually works before proceeding:
+
+```bash
+# Test auth against common protected endpoints
+AUTH_CHECK_URLS=("https://{{TARGET}}/api/me" "https://{{TARGET}}/api/user" "https://{{TARGET}}/api/profile" "https://{{TARGET}}/api/account" "https://{{TARGET}}/dashboard")
+
+AUTH_VERIFIED=false
+for url in "${AUTH_CHECK_URLS[@]}"; do
+  STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$url" \
+    -H "Authorization: Bearer ${JWT}" \
+    -H "Cookie: ${COOKIE_STRING}")
+  if [ "$STATUS" = "200" ] || [ "$STATUS" = "302" ]; then
+    AUTH_VERIFIED=true
+    AUTH_CHECK_URL="$url"
+    echo "[AUTH OK] Session verified at $url (HTTP $STATUS)"
+    break
+  fi
+done
+
+if [ "$AUTH_VERIFIED" = false ]; then
+  echo "[AUTH FAILED] Could not verify authentication on any common endpoint."
+  echo "Possible causes: wrong login selectors, CAPTCHA, MFA not handled, session not created."
+  echo "Proceeding with unauthenticated testing — attack coverage will be limited."
+fi
+```
+
+Update state.json auth section to include verification status:
+```json
+"auth": {
+  "authenticated": true,
+  "verified": true,
+  "verified_at": "URL_THAT_WORKED",
+  ...
+}
+```
+
+Store `AUTH_CHECK_URL` for use in health checks between batches.
+
 ### If no credentials:
 - Skip to Phase 2b with unauthenticated testing
 - Note in state.json: `"auth": { "authenticated": false }`
@@ -379,6 +419,24 @@ for agent_file in "${WORKDIR}/agents/attack-a-results.json" "${WORKDIR}/agents/a
 done
 ```
 
+### Auth Health Check
+
+Before spawning next batch, verify auth is still valid:
+
+```bash
+if [ "$AUTH_VERIFIED" = true ]; then
+  STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${AUTH_CHECK_URL}" \
+    -H "Authorization: Bearer ${JWT}" \
+    -H "Cookie: ${COOKIE_STRING}")
+  if [ "$STATUS" = "401" ] || [ "$STATUS" = "403" ]; then
+    echo "[AUTH EXPIRED] Session expired between batches — re-authenticating..."
+    # Re-run Phase 2 authentication flow
+    # Update state.json with fresh tokens
+    # Update JWT and COOKIE_STRING variables for next batch
+  fi
+fi
+```
+
 ### Batch 2 — Injection/SSRF (spawn together):
 
 **Agent C: Injection (SQLi, XSS, SSTI, Command Injection)**
@@ -413,6 +471,24 @@ for agent_file in "${WORKDIR}/agents/attack-c-results.json" "${WORKDIR}/agents/a
 done
 ```
 
+### Auth Health Check
+
+Before spawning next batch, verify auth is still valid:
+
+```bash
+if [ "$AUTH_VERIFIED" = true ]; then
+  STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${AUTH_CHECK_URL}" \
+    -H "Authorization: Bearer ${JWT}" \
+    -H "Cookie: ${COOKIE_STRING}")
+  if [ "$STATUS" = "401" ] || [ "$STATUS" = "403" ]; then
+    echo "[AUTH EXPIRED] Session expired between batches — re-authenticating..."
+    # Re-run Phase 2 authentication flow
+    # Update state.json with fresh tokens
+    # Update JWT and COOKIE_STRING variables for next batch
+  fi
+fi
+```
+
 ### Batch 3 — Logic/API (spawn together):
 
 **Agent E: Business Logic & Race Conditions**
@@ -445,6 +521,24 @@ for agent_file in "${WORKDIR}/agents/attack-e-results.json" "${WORKDIR}/agents/a
       && mv "${WORKDIR}/state.tmp" "${WORKDIR}/state.json"
   fi
 done
+```
+
+### Auth Health Check
+
+Before spawning next batch, verify auth is still valid:
+
+```bash
+if [ "$AUTH_VERIFIED" = true ]; then
+  STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${AUTH_CHECK_URL}" \
+    -H "Authorization: Bearer ${JWT}" \
+    -H "Cookie: ${COOKIE_STRING}")
+  if [ "$STATUS" = "401" ] || [ "$STATUS" = "403" ]; then
+    echo "[AUTH EXPIRED] Session expired between batches — re-authenticating..."
+    # Re-run Phase 2 authentication flow
+    # Update state.json with fresh tokens
+    # Update JWT and COOKIE_STRING variables for next batch
+  fi
+fi
 ```
 
 ### Batch 4 — File/WebSocket (spawn together):
