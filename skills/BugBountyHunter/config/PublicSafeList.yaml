@@ -1,0 +1,61 @@
+# v3.2 patch — Known-safe-by-design content patterns.
+# Phase 2.9 matcher runs each regex against exfiltrated-secret.txt for info_disclosure findings.
+# If the only matches are public-by-design entries, the finding auto-rejects as PUBLIC_BY_DESIGN.
+# Kills the F-J-001 (Datadog RUM) and F-F002 (git SHA) class of false positives.
+#
+# MATCHER REQUIREMENTS (for the Phase 2.9 B3 implementer):
+#   - Use Python `re.search` with `re.MULTILINE` enabled so `^` anchors match per-line,
+#     not just start-of-file. robots_txt_paths specifically relies on this.
+#   - Use case-sensitive matching unless an entry documents otherwise.
+#   - Do NOT auto-reject if the exfiltrated content is longer than 1024 bytes and contains
+#     mixed matches — only reject when ALL content in the file matches safe-by-design.
+#
+# DELIBERATELY OMITTED (require contextual matching to be safe; deferred to a
+# later iteration that pairs pattern-match with surrounding-token anchors):
+#   - Firebase API key (AIzaSy…): structurally identical to GCP keys that CAN be
+#     sensitive. Only safe-by-design when paired with firebaseConfig { apiKey: ... }.
+#   - Supabase anon key (JWT): distinguishable from service_role key only via JWT
+#     payload decode (role claim). Regex alone can't separate them.
+#   - Auth0 client_id: same format as client_secret — fully ambiguous without context.
+#   - Amplitude API key (32-hex): structurally identical to many other keys.
+#   - reCAPTCHA site key (6L…) REMOVED 2026-04-18 — structurally identical to
+#     reCAPTCHA SECRET keys; auto-rejecting exfiltrated secret keys would hide
+#     real findings. Re-add only with contextual anchors (e.g., `data-sitekey=` nearby).
+
+known_safe_by_design:
+  - id: datadog_rum_client_token
+    pattern: '\bpub[a-f0-9]{32,}|datadog[^\n]{0,200}clientToken'
+    note: Client-side observability token; intended to be public
+  - id: sentry_dsn_public
+    pattern: 'https://[a-f0-9]+@[a-z0-9.-]+\.ingest\.sentry\.io/[0-9]+'
+    note: Sentry DSN is a public identifier
+  - id: google_analytics_id
+    pattern: 'G-[A-Z0-9]{10}|UA-[0-9]+-[0-9]+|GTM-[A-Z0-9]+'
+    note: GA/GTM IDs are public by design
+  - id: stripe_publishable_key
+    pattern: 'pk_(live|test)_[A-Za-z0-9]{20,}'
+    note: Publishable Stripe keys are meant to be client-side
+  - id: git_commit_sha_header
+    pattern: '(X-Git-SHA|X-Revision|X-Version|X-Build-ID|X-Commit)'
+    note: Build-metadata headers — informational only
+  - id: robots_txt_paths
+    pattern: '^(Disallow|Allow|User-agent|Sitemap):'
+    note: robots.txt is meant to be public; path list alone is not a leak. Matcher MUST use re.MULTILINE for this pattern.
+  - id: cloudfront_distribution_id
+    pattern: '[a-zA-Z0-9]{12,14}\.cloudfront\.net'
+    note: Distribution hostnames are public CDN identifiers (DNS names are lowercase; console shows uppercase IDs)
+  - id: rum_or_synthetic_ids
+    pattern: '\brum[._-]?(id|key|token)\b'
+    note: Real-user-monitoring IDs, public by design
+  - id: segment_write_key
+    pattern: 'segment[_.]writeKey\s*[:=]|analytics\.load\([''"][A-Za-z0-9]{20,}[''"]\)'
+    note: Segment write keys are client-side by design
+  - id: intercom_app_id
+    pattern: 'intercom[_.]app_id\s*[:=]|Intercom\([''"][a-z0-9]{8}[''"]\)'
+    note: Intercom app IDs are public
+  - id: mapbox_public_token
+    pattern: 'pk\.eyJ[A-Za-z0-9._-]{60,}'
+    note: Mapbox public tokens are client-side by design (min 60 chars to avoid matching trivially short JWTs)
+  - id: azure_app_insights_instrumentation_key
+    pattern: 'InstrumentationKey=[A-Fa-f0-9]{8}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{12}'
+    note: Azure Application Insights instrumentation keys are public telemetry identifiers

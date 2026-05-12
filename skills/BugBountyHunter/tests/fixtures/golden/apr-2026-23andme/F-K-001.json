@@ -1,0 +1,27 @@
+{
+  "id": "F-K-001",
+  "agent": "K",
+  "class": "insecure_cookie_attribute",
+  "severity": "P4",
+  "severity_rationale": "remember_device_token issued by auth.23andme.com lacks Secure flag (HttpOnly=true, SameSite=Lax, Secure=false). Also 5 other cookies missing Secure. In a passive-MITM scenario (hostile Wi-Fi, downgrade) the remember-device token leaks. Standalone P4 (solo cookie-attribute findings rarely exceed P3); does NOT fall under excluded 'low_impact_missing_headers' because cookie-attribute is not a response-header exclusion.",
+  "validated": true,
+  "validation_method": "Cookie audit of state.json — 43 cookies reviewed, 6 missing Secure.",
+  "endpoint": "https://auth.23andme.com/ (remember_device_token issuance)",
+  "method": "Set-Cookie inspection",
+  "response_summary": "remember_device_token: HttpOnly=true, SameSite=Lax, Secure=false. 5 additional cookies missing Secure: _dd_s (auth, you), anonymous session variants.",
+  "impact": "Passive-network-MITM token exfiltration on non-HTTPS request to auth.23andme.com (downgrade path). Remember-device skip-MFA is high-value for account takeover chains.",
+  "chain": null,
+  "bounty_estimate": "$200 - $500",
+  "remediation": "Add Secure flag to remember_device_token and all 5 other identified cookies. Enforce HSTS (already present on auth.23andme.com — confirm preload).",
+  "cwe": "CWE-614",
+  "cvss_estimate": "3.1",
+  "reportability_audit": {
+    "Q1_evidence": "PASS — Set-Cookie observed",
+    "Q2_not_excluded": "PASS — Secure-flag on a sensitive token is NOT low_impact_missing_headers",
+    "Q3_impact_demonstrated": "PASS — cookie attribute recorded",
+    "Q4_not_low_class_solo": "PASS — insecure_cookie_attribute on a remember-device token is not q4-solo-demoted given the bypass-MFA implication",
+    "composability": "round=2",
+    "prior_report_similarity": "0.15 — mentioned in prior memory note (ID 859) but not in formal v001 HackerOne submission",
+    "gate_passed": true
+  }
+}

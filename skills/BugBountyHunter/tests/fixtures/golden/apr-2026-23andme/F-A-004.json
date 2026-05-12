@@ -1,0 +1,28 @@
+{
+  "id": "F-A-004",
+  "agent": "A",
+  "class": "information_disclosure",
+  "severity": "P3",
+  "severity_rationale": "Permanent per-account correlation identifier (auth_token_account_id) not rotated — same value today as 2 days ago in v001. Exposed in URL on every store->api SSO round-trip. v001 flagged the leak, but the NEW finding here is confirmed NON-ROTATION across remediation window. Reportable as 'post-remediation: identifier not rotated'.",
+  "validated": true,
+  "validation_method": "Curl — captured redirect URL query at hop 2; compared against v001 artifact (redirect-chain-evidence.txt).",
+  "endpoint": "https://api.23andme.com/authorize/ (hop 2 of SSO chain)",
+  "method": "GET (redirect parameter)",
+  "response_summary": "auth_token_account_id=rcVobEe+JpAshojPvHU9ArXf//8fzXNnCsERjQnZjZY= — IDENTICAL value to report-v001 captured 2026-04-16. No rotation despite remediation of the redirect sink.",
+  "impact": "Account-identifier-in-URL anti-pattern. Leaked via browser history, HTTP logs, CDN logs, Referer on any resource loaded during hop 2. Value is opaque (base64) but STABLE — single leak enables permanent tracking of victim across all future OAuth flows from store.",
+  "chain": "Enables F-A-001 / F-A-003 to yield a stable correlator.",
+  "chain_severity_upgrade": "P3 -> P2 chained",
+  "bounty_estimate": "$500 - $2,000",
+  "remediation": "(1) Rotate auth_token_account_id; (2) do not pass in URL — use server-side session or encrypted cookie; (3) if rotation is expensive, at minimum remove from query string on the store->api hop.",
+  "cwe": "CWE-598",
+  "cvss_estimate": "4.3",
+  "reportability_audit": {
+    "Q1_evidence": "PASS",
+    "Q2_not_excluded": "PASS",
+    "Q3_impact_demonstrated": "PASS — same value across sessions, documented",
+    "Q4_not_low_class_solo": "PASS",
+    "composability": "round=2",
+    "prior_report_similarity": "0.55 — PARTIAL: v001 flagged the leak; the NEW element is proof of non-rotation. Report as follow-up info-disclosure.",
+    "gate_passed": true
+  }
+}

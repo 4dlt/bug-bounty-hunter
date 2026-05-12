@@ -1,0 +1,35 @@
+# HackerOne precedent index — seed rows for A3.
+#
+# Field semantics:
+#   program      — HackerOne program handle, or "generic" for cross-program median
+#   class        — vulnerability class matching ArtifactMatrix canonical name
+#   severity     — P1..P5
+#   bounty       — number: confirmed paid amount (0 = confirmed unpaid; still a precedent)
+#                  null: amount undisclosed; row is retained as context but NOT citable for a figure
+#   url          — real HackerOne disclosure URL, OR a placeholder:// scheme for seed stubs
+#   closed_as    — "resolved" rows are citable precedents; "duplicate", "informative",
+#                  "not-applicable" are anti-evidence and are FILTERED OUT at lookup time
+#   date         — ISO-8601 date of closure
+#   placeholder  — true for seed/stub rows (hand-coded medians, not real disclosures);
+#                  the lookup returns null for placeholder rows unless --allow-placeholder
+#                  is passed. This keeps Advocate citations honest until real data arrives.
+#   notes        — free-form curator notes (methodology, source, quirks)
+#
+# Curator rules:
+#   - On duplicate (program, class, severity) keys, the FIRST matching row wins.
+#     Keep keys unique per (program, class, severity).
+#   - Remove placeholder:true rows as real disclosures arrive to replace them.
+#   - Only add rows with closed_as == "resolved" unless you are intentionally tracking
+#     anti-evidence (in which case Advocate won't cite them anyway).
+#
+# Lines starting with '#' and blank lines are ignored.
+{"program":"23andme","class":"oauth_misconfiguration","severity":"P3","bounty":1500,"url":"placeholder://seed/23andme-oauth-misconfig-p3","closed_as":"resolved","date":"2025-09-15","placeholder":true,"notes":"Seed stub — replace with real disclosure URL when one is published"}
+{"program":"generic","class":"idor","severity":"P2","bounty":3000,"url":"placeholder://seed/generic-idor-p2","closed_as":"resolved","date":"2025-11-20","placeholder":true,"notes":"Hand-coded cross-program median — replace with real disclosure aggregates"}
+{"program":"generic","class":"idor","severity":"P3","bounty":800,"url":"placeholder://seed/generic-idor-p3","closed_as":"resolved","date":"2025-10-05","placeholder":true,"notes":"Hand-coded cross-program median"}
+{"program":"generic","class":"xss_reflected","severity":"P3","bounty":1200,"url":"placeholder://seed/generic-xss-reflected-p3","closed_as":"resolved","date":"2025-08-12","placeholder":true,"notes":"Hand-coded cross-program median"}
+{"program":"generic","class":"xss_stored","severity":"P2","bounty":4000,"url":"placeholder://seed/generic-xss-stored-p2","closed_as":"resolved","date":"2025-07-22","placeholder":true,"notes":"Hand-coded cross-program median"}
+{"program":"generic","class":"ssrf","severity":"P2","bounty":3500,"url":"placeholder://seed/generic-ssrf-p2","closed_as":"resolved","date":"2025-09-30","placeholder":true,"notes":"Hand-coded cross-program median — SSRF with OOB confirmation"}
+{"program":"generic","class":"open_redirect_client","severity":"P4","bounty":250,"url":"placeholder://seed/generic-open-redirect-p4","closed_as":"resolved","date":"2025-06-10","placeholder":true,"notes":"Hand-coded cross-program median"}
+{"program":"generic","class":"auth_bypass_server_side","severity":"P1","bounty":8000,"url":"placeholder://seed/generic-auth-bypass-p1","closed_as":"resolved","date":"2025-11-01","placeholder":true,"notes":"Hand-coded cross-program median"}
+{"program":"generic","class":"csrf","severity":"P3","bounty":900,"url":"placeholder://seed/generic-csrf-p3","closed_as":"resolved","date":"2025-09-05","placeholder":true,"notes":"Hand-coded cross-program median — CSRF with harmful action"}
+{"program":"generic","class":"oauth_csrf","severity":"P2","bounty":2500,"url":"placeholder://seed/generic-oauth-csrf-p2","closed_as":"resolved","date":"2025-10-18","placeholder":true,"notes":"Hand-coded cross-program median — OAuth CSRF with account linking impact"}

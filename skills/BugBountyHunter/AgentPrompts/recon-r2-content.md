@@ -21,7 +21,7 @@ Tech Stack: Read from state.json tech_stack
    check_scope() {
      local url="$1"
      local domain=$(echo "$url" | sed 's|https\?://||' | cut -d/ -f1 | cut -d: -f1)
-     if ! grep -qF "$domain" /tmp/pentest-{{ID}}/scope-allowlist.txt 2>/dev/null; then
+     if ! grep -xqF "$domain" /tmp/pentest-{{ID}}/scope-allowlist.txt 2>/dev/null; then
        echo "[SCOPE BLOCKED] $domain is NOT in scope — request skipped"
        return 1
      fi

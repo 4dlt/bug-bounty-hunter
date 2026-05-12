@@ -1,0 +1,27 @@
+{
+  "id": "F-K-003",
+  "agent": "K",
+  "class": "permissive_csp_api_host",
+  "severity": "P4",
+  "severity_rationale": "api.23andme.com's enforced CSP is effectively nil (default-src *, script-src * unsafe-inline unsafe-eval). Also a report-only strict policy exists (toothless). Standalone: P5 (CSP absence is defense-in-depth, excluded as standalone under low_impact_missing_headers). REPORTABLE angle: the endpoints that return HTML on api.23andme.com (error pages, /authorize/ UI surface) render without CSP — any future HTML-XSS here goes unblocked. Elevated to P4 because this is a chain-enabler to F-F004 and any future api-host reflected-XSS.",
+  "validated": true,
+  "validation_method": "Curl — header inspection across multiple api.23andme.com endpoints.",
+  "endpoint": "https://api.23andme.com/",
+  "method": "GET (header audit)",
+  "response_summary": "Enforced CSP: default-src * data:; script-src * 'unsafe-inline' 'unsafe-eval'; style-src * 'unsafe-inline'. Report-Only header is strict but toothless. report-uri points to 3rd-party host.",
+  "impact": "Defense-in-depth gap. Any HTML-returning api.23andme.com surface (error 500/404 HTML, /authorize/ UI) that reflects user input becomes unblocked XSS.",
+  "chain": "Chain enabler for any future api.23andme.com HTML-XSS finding.",
+  "bounty_estimate": "$100 - $400",
+  "remediation": "Apply the existing Report-Only policy as enforcing policy on api.23andme.com HTML responses. Move report-uri to a first-party endpoint.",
+  "cwe": "CWE-693 / CWE-1021",
+  "cvss_estimate": "3.1",
+  "reportability_audit": {
+    "Q1_evidence": "PASS — headers observed",
+    "Q2_not_excluded": "BORDERLINE — api CSP-absence would normally be excluded; retained because api.23andme.com serves HTML in some paths and report-only is deployed but not enforcing (indicates intent — partial rollout)",
+    "Q3_impact_demonstrated": "PASS — concrete header values documented",
+    "Q4_not_low_class_solo": "DEMOTED — this would normally be q4_low_class_solo (permissive_csp); RETAINED as P4 only because the chain-enabler angle to F-F004 overrides solo demotion. If HackerOne triage rejects as solo, resubmit only as part of an XSS chain.",
+    "composability": "round=2",
+    "prior_report_similarity": "0.0",
+    "gate_passed": true
+  }
+}

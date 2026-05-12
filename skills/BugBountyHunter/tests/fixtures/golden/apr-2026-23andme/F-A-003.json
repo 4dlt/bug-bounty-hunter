@@ -1,0 +1,28 @@
+{
+  "id": "F-A-003",
+  "agent": "A",
+  "class": "oauth_misconfiguration",
+  "severity": "P3",
+  "severity_rationale": "State parameter is used as origin-tracking payload, NOT as anti-CSRF nonce. Attacker can craft a fully-formed authorize URL with arbitrary state; victim click completes flow on attacker's terms. Classic OAuth login-CSRF. Prior report-v001 mentioned state nonce absence but did not isolate this as a separate finding — report as NEW primary CSRF finding.",
+  "validated": true,
+  "validation_method": "Curl — 4 different attacker-controlled state JSON payloads all echoed unchanged through hops 0-2.",
+  "endpoint": "https://auth.23andme.com/authorize/",
+  "method": "GET",
+  "response_summary": "state is used purely as an origin-tracking payload, not as an anti-CSRF nonce. There is no server-side mapping of state to the initiator's session; any value is accepted and echoed back at callback.",
+  "impact": "OAuth login-CSRF: attacker forces victim to complete an OAuth round-trip on attacker's chosen terms (e.g., linking victim's 23andMe auth to attacker's downstream account, or forcing a specific origin_uri). Combined with F-A-004's account-identifier leak, attacker can observe victim's account correlator on every triggered flow.",
+  "chain": "Core link in F-A-001 + F-A-003 + F-A-004 OAuth-CSRF + info-disclosure chain.",
+  "chain_severity_upgrade": "P3 -> P2 chained",
+  "bounty_estimate": "$800 - $2,500",
+  "remediation": "Generate cryptographically random state nonce, bind server-side to initiator session, verify on callback. Keep origin_uri in a separate server-side-stored field, not in state.",
+  "cwe": "CWE-352",
+  "cvss_estimate": "5.4",
+  "reportability_audit": {
+    "Q1_evidence": "PASS — 4 payload variants accepted",
+    "Q2_not_excluded": "PASS",
+    "Q3_impact_demonstrated": "PASS — concrete state injection demonstrated",
+    "Q4_not_low_class_solo": "PASS",
+    "composability": "round=2",
+    "prior_report_similarity": "0.4 — partial overlap with v001 (mentioned state as origin tracker), but v001 framed it as 'no CSRF nonce' under a larger chain. This isolates the CSRF-nonce gap as a standalone. Keep.",
+    "gate_passed": true
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "id": "F-A-002",
+  "agent": "A",
+  "class": "oauth_misconfiguration",
+  "severity": "P4",
+  "severity_rationale": "Missing PKCE on first-party public-client OAuth flow. No direct exploit, but deviates from OAuth 2.1 / RFC 8252 best practice and amplifies any future code-interception vulnerability. Standalone severity is P4/P5; elevated to P4 because the client_id=store flow is the exact surface exercised by the F-A-001 chain.",
+  "validated": true,
+  "validation_method": "Curl: sent code_challenge; flow completed without any code_verifier. Sending no code_challenge also completed successfully — PKCE not enforced.",
+  "endpoint": "https://auth.23andme.com/authorize/",
+  "method": "GET",
+  "response_summary": "PKCE is neither required nor meaningfully processed. Authorize flow completes identically whether code_challenge is present or absent. No rejection for missing PKCE on public-client-style first-party flow.",
+  "impact": "Auth-code interception scenarios (network MITM, XSS-on-callback, Referer/log leak) allow code replay without code_verifier.",
+  "chain": "Amplifies F-A-001 (Referer leak becomes code replay).",
+  "chain_severity_upgrade": "P4 -> P3 chained",
+  "bounty_estimate": "$200 - $800",
+  "remediation": "Enforce PKCE (S256) for public first-party clients per OAuth 2.1.",
+  "cwe": "CWE-1390",
+  "cvss_estimate": "3.7",
+  "reportability_audit": {
+    "Q1_evidence": "PASS — curl proof",
+    "Q2_not_excluded": "PASS",
+    "Q3_impact_demonstrated": "PASS — flow-complete-without-verifier captured",
+    "Q4_not_low_class_solo": "PASS",
+    "composability": "round=2",
+    "prior_report_similarity": "0.2 — NEW (not in v001)",
+    "gate_passed": true
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "id": "F-A-001",
+  "agent": "A",
+  "class": "oauth_misconfiguration",
+  "severity": "P3",
+  "severity_rationale": "Partial remediation of prior report-v001 chain. The open-redirect sink (evil.com reachability) is now blocked (HTTP 500 on hop 3), but auth_token_account_id still leaks in hop-2 URL, referrer-policy unsafe-url still set on hops 0-1 (auth-code Referer leak surface), and state JSON lacks CSRF nonce. NOT a duplicate of prior — this is an authorized re-test showing incomplete remediation; submit as 'partial remediation update' tied to v001 H1 ticket.",
+  "validated": true,
+  "validation_method": "Curl reproduction + dev-browser v3-auth session + cross-reference with report-v001 artifacts",
+  "endpoint": "https://auth.23andme.com/authorize/ -> store.23andme.com/auth_callback/ -> api.23andme.com/authorize/ -> store.23andme.com/oauth_callback/",
+  "method": "GET (redirect chain)",
+  "response_summary": "Malicious origin_uri still propagates unchanged through hops 0-2; hop-3 sink now 500s instead of redirecting to attacker origin (fix applied). auth_token_account_id=rcVobEe+JpAshojPvHU9ArXf//8fzXNnCsERjQnZjZY= still leaks in hop-2 URL (same value as v001, not rotated). referrer-policy unsafe-url still present on hops 0-1.",
+  "impact": "Residual OAuth code exposure via Referer (unsafe-url on hops 0-1); permanent encrypted account identifier leaked in URL on every store->api SSO round-trip (browser history, CDN logs, any 3rd-party resource on landing page). State-parameter CSRF surface unchanged (see F-A-003).",
+  "chain": "F-A-001 + F-A-003 + F-A-004 (OAuth+CSRF + info_disclosure chain): attacker-supplied state + no nonce + leaked account identifier = login-CSRF with persistent victim-account correlation.",
+  "chain_severity_upgrade": "P3 -> P2 when chained with F-A-003/F-A-004",
+  "bounty_estimate": "$1,000 - $3,000 (partial-remediation update; baseline P3)",
+  "remediation": "Complete the remediation started after report-v001: (1) rotate auth_token_account_id and remove it from URL, (2) add CSRF nonce to state, (3) change referrer-policy from unsafe-url to same-origin on /authorize/.",
+  "cwe": "CWE-601 / CWE-352 / CWE-200",
+  "cvss_estimate": "5.4",
+  "reportability_audit": {
+    "Q1_evidence": "PASS — curl+browser reproduction with recorded hop-by-hop evidence in attack-a-evidence/",
+    "Q2_not_excluded": "PASS — not in excluded_findings list",
+    "Q3_impact_demonstrated": "PASS — concrete leaked value, identical to prior token, documented in attack-a-results.json",
+    "Q4_not_low_class_solo": "PASS — oauth_misconfiguration is not in q4_low_class_solo_list",
+    "composability": "round=2 — no demotion",
+    "prior_report_similarity": "0.6 — PARTIAL MATCH to v001 (explicitly retest + partial remediation). Keep as follow-up.",
+    "gate_passed": true
+  }
+}

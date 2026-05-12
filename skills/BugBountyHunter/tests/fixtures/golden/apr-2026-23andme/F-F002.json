@@ -1,0 +1,27 @@
+{
+  "id": "F-F002",
+  "agent": "F",
+  "class": "security_misconfiguration",
+  "severity": "P4",
+  "severity_rationale": "Internal 10.92.x.x AWS private-subnet IP enumeration via response headers plus git commit SHA + release candidate leaked. Attacker can pivot to public GitHub to diff source. Datadog correlated.",
+  "validated": true,
+  "validation_method": "Curl — header enumeration across 3 hosts over repeated requests.",
+  "endpoint": "https://api.23andme.com/ (also https://you.23andme.com/, https://store.23andme.com/)",
+  "method": "GET (header audit)",
+  "response_summary": "X-* or Server headers disclose 10.92.x.x internal IPs, git SHA, release candidate, Datadog service/env tags on repeated requests.",
+  "impact": "Backend-fleet enumeration + source-version leak enables targeted CVE pivot and internal-subnet knowledge for SSRF chains.",
+  "chain": "Feeds potential SSRF chain (not demonstrated this round).",
+  "bounty_estimate": "$200 - $800",
+  "remediation": "Strip internal IPs, git SHA, and release-candidate tags from public response headers. Keep for internal monitoring only.",
+  "cwe": "CWE-200",
+  "cvss_estimate": "4.3",
+  "reportability_audit": {
+    "Q1_evidence": "PASS",
+    "Q2_not_excluded": "PASS",
+    "Q3_impact_demonstrated": "PASS — header samples captured",
+    "Q4_not_low_class_solo": "PASS",
+    "composability": "round=2",
+    "prior_report_similarity": "0.0",
+    "gate_passed": true
+  }
+}

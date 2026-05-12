@@ -1,0 +1,144 @@
+# v3.2 patch — Per-class required evidence artifacts.
+# Phase 2.9 mechanical gate reads this and auto-rejects findings missing required files.
+
+severity_cap:
+  source_only: P4   # SKILL.md Rule 13 — source-only findings never validate above P4
+
+program_excluded_classes:
+  # Never-qualifying classes across most bug bounty programs. These are the
+  # canonical "don't bother submitting" types — missing security headers, best
+  # practice gaps, known exclusions. Programs can also add entries here via
+  # scope.yaml.excluded_findings, but these are universal.
+  - missing_security_headers
+  - insecure_cookie_attribute
+  - permissive_csp_api_host
+  - clickjacking
+  - rate_limiting_non_auth
+  - outdated_libraries_no_exploit
+  - physical_access_required
+  - unlikely_user_interaction
+  - data_breach_vulns
+  - best_practice_only
+  # Expanded 2026-04-19 — common non-qualifiers observed across YesWeHack /
+  # HackerOne / Bugcrowd programs. Add more here when you see a recurring
+  # close-reason in real triage logs.
+  - tabnabbing
+  - user_enumeration
+  - self_xss
+  - content_text_injection
+  - mixed_content_warnings
+  - autocomplete_attribute
+  - hsts_header
+  - session_expiration_policies
+  - password_requirements_policies
+  - spf_dkim_dmarc_missing
+  - subdomain_takeover_without_poc
+  - disclosed_google_api_key
+  - csv_injection
+  - blind_ssrf_dns_only
+  - open_ports_no_impact
+  - verbose_error_message_no_data
+  - directory_listing
+  - stack_trace_exposure
+  - software_version_disclosure
+  - ip_disclosure
+
+cross_tenant_classes:
+  - idor
+  - bola
+  - mass_assignment_cross_tenant
+  - privilege_escalation_cross_role
+
+class_aliases:
+  # Maps fine-grained attack-agent class names to their ArtifactMatrix canonical class.
+  # Phase 2.9 resolves class via this map before artifact lookup.
+  # Added to reconcile ArtifactMatrix with the broader EvidenceRules.yaml taxonomy
+  # during the v3.2 transition period.
+  sql_injection_time: sql_injection_blind
+  sensitive_data_in_response: info_disclosure
+  exposed_credentials: info_disclosure
+  exposed_pii_in_api_response: info_disclosure
+  verbose_error_message_with_data: info_disclosure
+  source_map_exposed: info_disclosure
+  information_disclosure: info_disclosure
+  mass_assignment: idor_auth_logic
+
+classes:
+  xss_reflected:
+    required_artifacts: [browser-poc.html, alert-fired.png, replay.har]
+    rejection_reason: NO_BROWSER_POC
+  xss_stored:
+    required_artifacts: [browser-poc.html, alert-fired.png, replay.har, persistence-proof.png]
+    rejection_reason: NO_BROWSER_POC
+  xss_dom:
+    required_artifacts: [browser-poc.html, alert-fired.png, replay.har]
+    rejection_reason: NO_BROWSER_POC
+  postmessage_missing_origin:
+    required_artifacts: [cross-origin-sender.html, harmful-action.png, listener-url.txt]
+    rejection_reason: REPLICA_NOT_REAL
+  postmessage_xss:
+    required_artifacts: [cross-origin-sender.html, alert-fired.png, listener-url.txt]
+    rejection_reason: REPLICA_NOT_REAL
+  idor:
+    required_artifacts: [account-a-request.http, account-b-response.http, data-belongs-to-b.txt]
+    rejection_reason: MISSING_CROSS_TENANT
+  bola:
+    required_artifacts: [account-a-request.http, account-b-response.http, data-belongs-to-b.txt]
+    rejection_reason: MISSING_CROSS_TENANT
+  idor_auth_logic:
+    required_artifacts: [crafted-request.http, response-showing-authz-gap.http, authz-logic-analysis.md]
+    rejection_reason: NO_AUTHZ_GAP_EVIDENCE
+  oauth_csrf:
+    required_artifacts: [victim-browser.har, harmful-action-log.json, attacker-origin.html]
+    rejection_reason: NO_VICTIM_IMPACT
+  oauth_state:
+    required_artifacts: [victim-browser.har, harmful-action-log.json]
+    rejection_reason: NO_VICTIM_IMPACT
+  ssrf:
+    required_artifacts: [interactsh-hit.json]
+    alternate_artifacts: [internal-response.http, internal-host-reached.txt]
+    rejection_reason: NO_OOB_CONFIRMATION
+  open_redirect_client:
+    required_artifacts: [browser-landing.har, landing-screenshot.png]
+    rejection_reason: NO_LANDING_PROOF
+  auth_bypass_server_side:
+    required_artifacts: [pre-auth.har, post-auth.har, response-diff.txt]
+    rejection_reason: NO_AUTH_DIFFERENTIAL
+  info_disclosure:
+    required_artifacts: [exfiltrated-secret.txt, sensitive-claim.md]
+    rejection_reason: PUBLIC_BY_DESIGN_OR_NO_SECRET
+  sql_injection_blind:
+    required_artifacts: [timing-differential.json]
+    rejection_reason: NO_TIMING_PROOF
+  csrf:
+    required_artifacts: [victim-browser.har, attacker-origin.html, harmful-action-log.json]
+    rejection_reason: NO_VICTIM_IMPACT
+  race_condition:
+    required_artifacts: [before-state.json, race-log.jsonl, after-state.json]
+    rejection_reason: NO_STATE_CHANGE
+  command_injection_blind:
+    required_artifacts: [interactsh-hit.json]
+    alternate_artifacts: [timing-differential.json]
+    rejection_reason: NO_OOB_CONFIRMATION
+  xxe_blind:
+    required_artifacts: [interactsh-hit.json]
+    alternate_artifacts: [timing-differential.json]
+    rejection_reason: NO_OOB_CONFIRMATION
+  business_logic_bypass:
+    required_artifacts: [before-state.json, exploit-request.http, after-state.json]
+    rejection_reason: NO_STATE_CHANGE
+  csp_bypass_via_dom:
+    required_artifacts: [browser-poc.html, alert-fired.png, replay.har]
+    rejection_reason: NO_BROWSER_POC
+  prototype_pollution:
+    required_artifacts: [browser-poc.html, alert-fired.png, replay.har]
+    rejection_reason: NO_BROWSER_POC
+  dom_clobbering:
+    required_artifacts: [browser-poc.html, alert-fired.png, replay.har]
+    rejection_reason: NO_BROWSER_POC
+  mass_assignment_cross_tenant:
+    required_artifacts: [account-a-write-request.http, account-b-read-response.http, cross-tenant-effect.txt]
+    rejection_reason: MISSING_CROSS_TENANT
+  privilege_escalation_cross_role:
+    required_artifacts: [role-a-request.http, role-b-response.http, privilege-diff.txt]
+    rejection_reason: NO_ROLE_ELEVATION_PROOF

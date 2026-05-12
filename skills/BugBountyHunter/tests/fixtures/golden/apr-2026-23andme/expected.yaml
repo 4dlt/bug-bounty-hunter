@@ -1,0 +1,64 @@
+# Expected disposition when the new Phase 2.9 + Phase 3 logic processes each
+# Apr-18 golden fixture. Derived from analysis of what each finding's artifacts
+# actually prove vs what its validator self-grade claimed.
+#
+# SCHEMA SNAPSHOT: fixtures reflect state.json schema as of 2026-04-18. If
+# state.json schema evolves (new required fields, renames), refresh fixtures via
+# lib/extract-apr-fixtures.sh AND re-judge each disposition here.
+#
+# Acceptance bar for the overall patch (G1 regression):
+#   - >=4 findings discarded at Phase 2.9 (mechanical, no LLM):
+#       F-K-001, F-K-003 (PROGRAM_EXCLUDED_CLASS)
+#       F-J-001 (PUBLIC_BY_DESIGN via Datadog RUM match)
+#       F-A-004 (PUBLIC_BY_DESIGN_OR_NO_SECRET — info_disclosure with no evidence on disk)
+#   - F-F002 surfaces to Phase 3 (class 'security_misconfiguration' is too broad to alias;
+#     Triager will close it there via the same safe-list mechanism)
+#   - <=2 findings survive to validated_findings[] after the Advocate ⇆ Triager debate
+expectations:
+  F-K-001:
+    phase_2_9: artifact_discarded
+    reason: PROGRAM_EXCLUDED_CLASS
+    excluded_match: insecure_cookie_attribute
+    comment: "ArtifactMatrix.program_excluded_classes lists insecure_cookie_attribute; this overrides the validator's MFA-chain argument that tried to escape the cookie-attribute exclusion. The mechanical gate is specifically designed not to accept hedging. In a program that does NOT exclude low_impact_missing_headers / insecure_cookie_attribute, this finding could legitimately pass."
+  F-K-003:
+    phase_2_9: artifact_discarded
+    reason: PROGRAM_EXCLUDED_CLASS
+    excluded_match: permissive_csp_api_host
+    comment: "Validator self-graded Q2 as BORDERLINE and passed anyway; ArtifactMatrix mechanically rejects on the class name. Desired behavior: the mechanical gate isn't supposed to accept hedging."
+  F-J-001:
+    phase_2_9: artifact_discarded
+    reason: PUBLIC_BY_DESIGN
+    match: datadog_rum_client_token
+    comment: "Datadog RUM token is client-side observability, public by design."
+  F-F002:
+    phase_3: triager_closed
+    close_code: PUBLIC_BY_DESIGN
+    match: git_commit_sha_header
+    comment: "Git SHA in response header is build-metadata, informational only. The original validator classified this as 'security_misconfiguration' (too broad to auto-reject at Phase 2.9), so the mechanical gate surfaces it to Phase 3 where the Triager correctly closes it as PUBLIC_BY_DESIGN citing the matched safe-list entry."
+  F-I-001:
+    phase_3: triager_closed
+    close_code: REPLICA_NOT_REAL
+    severity_capped: P4
+    comment: "Source-code review + handler replicas — not the real endpoints. SKILL Rule 13 caps P4."
+  F-A-001:
+    phase_3: triager_closed
+    close_code: PARTIAL_REMEDIATION_DUPLICATE
+    prior_report: v001
+    comment: "Advocate's own rationale admits this is a retest of the v001 chain."
+  F-A-002:
+    phase_3: triager_closed
+    close_code: INFORMATIVE_NO_IMPACT
+    comment: "OAuth PKCE best-practice gap without a demonstrated exploit is informational."
+  F-A-003:
+    phase_3: triager_closed
+    close_code: INFORMATIVE_NO_IMPACT
+    gap: no_victim_csrf_poc
+    comment: "State echo alone is not a CSRF; no victim-side PoC demonstrating harmful action."
+  F-A-004:
+    phase_2_9: artifact_discarded
+    reason: PUBLIC_BY_DESIGN_OR_NO_SECRET
+    comment: "Source class 'information_disclosure' aliases to info_disclosure, which requires exfiltrated-secret.txt + sensitive-claim.md artifacts. Fixture has neither, so Phase 2.9 mechanically rejects via the missing-artifact branch — no need to escalate to Phase 3. If a future run seeded real evidence showing cross-tenant harm, the finding would survive to Phase 3 for the Triager to judge; in the Apr-18 fixture, it's evidence-free on disk."
+  F-E-001:
+    phase_3: triager_closed
+    close_code: INFORMATIVE_NO_IMPACT
+    comment: "500/200 differential oracle on state-changing endpoints without extracted secret is informational."

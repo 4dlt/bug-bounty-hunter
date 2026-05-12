@@ -1,0 +1,84 @@
+{
+  "auth": {
+    "status": "verified",
+    "primary_domain": "app.target.com",
+    "method": "password",
+    "auth_strategy": "jwt-oauth",
+    "jwts": {
+      "access_token": "eyJ.test.token",
+      "refresh_token": "eyJ.test.refresh",
+      "id_token": "eyJ.test.id"
+    },
+    "cookies": [],
+    "csrf_token": null,
+    "refresh_endpoint": "https://app.target.com/oauth/token",
+    "refresh_method": "POST",
+    "refresh_body_template": "grant_type=refresh_token&refresh_token={{REFRESH_TOKEN}}",
+    "refresh_count": 0,
+    "refresh_failure_count": 0,
+    "access_token_lifetime_seconds": 3600,
+    "refresh_token_lifetime_seconds": 604800,
+    "expires_at": "2099-01-01T00:00:00Z",
+    "acquired_at": "2026-04-18T03:00:00Z",
+    "last_refreshed_at": null,
+    "per_domain_status": {
+      "app.target.com": {
+        "verified": true,
+        "verified_at": "/api/me",
+        "status": 200,
+        "auth_artifact": "session_cookie"
+      }
+    },
+    "sso_chain": [
+      {
+        "hop": 1,
+        "from": "auth.target.com/authorize",
+        "to": "store.target.com/auth_callback?code=x&state=y",
+        "status": 302,
+        "params_seen": ["code", "state"],
+        "leaks_detected": [
+          "referrer-policy: unsafe-url",
+          "origin_uri in state parameter",
+          "OAuth code in URL"
+        ]
+      }
+    ],
+    "stale": false,
+    "failure_reason": null,
+    "user_decision": null
+  },
+  "findings": [
+    {
+      "id": "TEST-001",
+      "agent": "C",
+      "class": "xss_stored",
+      "severity_estimate": "P2",
+      "endpoint": "https://app.target.com/api/profile",
+      "method": "POST",
+      "payload": "<img src=x onerror=alert(1)>",
+      "response_summary": "Payload stored, reflected to other users",
+      "poc_curl": "curl ...",
+      "impact": "Stored XSS",
+      "chain_potential": "Account takeover",
+      "validation_evidence": {
+        "browser_verified": true,
+        "screenshot_path": "/tmp/test.png",
+        "console_log": "alert dialog fired",
+        "verified_at": "2026-04-18T05:00:00Z",
+        "oob_callback_received": false,
+        "timing_differential_ms": null,
+        "response_excerpt": null,
+        "before_after_state": null
+      },
+      "impact_demonstrated": "Payload executed in browser, document.cookie exfiltrated",
+      "discovery_phase": "2",
+      "discovery_round": 2,
+      "candidate_score": null
+    }
+  ],
+  "artifact_discarded": [],
+  "triager_closed": [],
+  "validated_findings": [],
+  "pipeline_mode": "full_idor",
+  "account_count": 2
+}

@@ -1,0 +1,27 @@
+{
+  "id": "F-J-001",
+  "agent": "J",
+  "class": "information_disclosure",
+  "severity": "P4",
+  "severity_rationale": "api.23andme.com/robots.txt reveals internal AWS us-west-2 VPC addressing (10.92.0.0/16) and per-pod hostnames. Aids SSRF/internal-service targeting. Also exposes Datadog RUM tokens. Public-internet-reachable file.",
+  "validated": true,
+  "validation_method": "Curl — HTTP 200 text/plain body.",
+  "endpoint": "https://api.23andme.com/robots.txt",
+  "method": "GET",
+  "response_summary": "robots.txt contents include references to 10.92.x.x internal hosts and Datadog RUM tokens.",
+  "impact": "Internal inventory disclosure accelerates SSRF / internal-network reconnaissance. Datadog RUM token is typically low-sensitivity (client-side observability) but reputation-spam surface.",
+  "chain": null,
+  "bounty_estimate": "$150 - $500",
+  "remediation": "Remove internal VPC references from robots.txt. Move RUM tokens to runtime injection from backend, not static file.",
+  "cwe": "CWE-200 / CWE-552",
+  "cvss_estimate": "3.7",
+  "reportability_audit": {
+    "Q1_evidence": "PASS",
+    "Q2_not_excluded": "PASS",
+    "Q3_impact_demonstrated": "PASS — contents captured",
+    "Q4_not_low_class_solo": "PASS",
+    "composability": "round=2",
+    "prior_report_similarity": "0.0",
+    "gate_passed": true
+  }
+}

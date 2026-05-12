@@ -1,0 +1,28 @@
+{
+  "id": "F-I-001",
+  "agent": "I",
+  "class": "postmessage_missing_origin_validation",
+  "severity": "P3",
+  "severity_rationale": "Source-confirmed cross-origin postMessage acceptance in 4 production survey listeners on you.23andme.com (cogstate, hearing, cog_game, cog_game_stream). Attacker-controlled page can postMessage to the victim tab and (1) force survey-complete state (research data integrity), (2) inject fabricated hearing-test result, (3) mutate iframe DOM state. Integrity impact on regulated research data. Primary exploit confirmed in handler-replica test; full live PoC deferred due to survey-enrolment requirement.",
+  "validated": true,
+  "validation_method": "Source-code review + byte-for-byte handler replicas tested in dev-browser with origin='https://evil.example.com'.",
+  "endpoint": "you.23andme.com survey iframes (cogstate, hearing, cog_game, cog_game_stream)",
+  "method": "window.postMessage",
+  "response_summary": "Four production listeners accept cross-origin postMessage with NO event.origin validation. Handler replicas fired save/error/resize actions from evil.example.com origin.",
+  "impact": "Research-study data integrity violation (fabricated survey results), iframe state manipulation, potential chain to stored-XSS via research-admin review surfaces (speculation — not demonstrated).",
+  "chain": "postmessage + xss chain candidate: if any admin/researcher-review UI renders fabricated survey payload unescaped, stored XSS on research admin surface. Not demonstrated — would require access to researcher view.",
+  "chain_severity_upgrade": null,
+  "bounty_estimate": "$500 - $2,500",
+  "remediation": "Add event.origin allowlist check (e.g., event.origin === 'https://you.23andme.com') at the top of each listener before processing. Consider postMessage channel with MessageChannel + transferable ports for iframe->parent trust boundary.",
+  "cwe": "CWE-346 / CWE-345",
+  "cvss_estimate": "6.1",
+  "reportability_audit": {
+    "Q1_evidence": "PASS — handler replica in dev-browser (source-byte-exact)",
+    "Q2_not_excluded": "PASS",
+    "Q3_impact_demonstrated": "PASS — attacker origin accepted, action fired",
+    "Q4_not_low_class_solo": "PASS",
+    "composability": "round=2",
+    "prior_report_similarity": "0.0",
+    "gate_passed": true
+  }
+}

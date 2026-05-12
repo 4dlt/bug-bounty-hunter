@@ -1,0 +1,46 @@
+target: 23andme.com
+program_url: https://hackerone.com/23andme
+h1_username: 4dlt
+h1_email: 4dlt@wearehackerone.com
+
+in_scope:
+  - "api.23andme.com"
+  - "auth.23andme.com"
+  - "store.23andme.com"
+  - "you.23andme.com"
+
+out_of_scope:
+  - "CustomerCare Portal"
+  - "*.third-party.com"
+  - "Chatbot AI Agent (Ada)"
+  - "Zendesk"
+  - "Braintree"
+  - "Google Maps API keys"
+
+auth:
+  username: "4dlt@wearehackerone.com"
+  password: "H1-BugBounty-2026!xK9"
+  login_url: "https://you.23andme.com/sign-in/"
+
+rate_limit_per_second: 3
+testing_hours: "24/7"
+
+required_headers:
+  - "X-HackerOne-Research: 4dlt"
+
+special_rules:
+  - "Use HackerOne email alias for account creation"
+  - "Include X-HackerOne-Research: 4dlt header in ALL requests"
+  - "Avoid multiple IP addresses during testing"
+  - "Stop testing if encounter sensitive data"
+  - "No automated vulnerability scanners"
+  - "Max 3 requests per second"
+
+excluded_findings:
+  - low_impact_missing_headers
+  - outdated_libraries_no_exploit
+  - clickjacking
+  - unlikely_user_interaction
+  - physical_access_required
+  - rate_limiting_non_auth
+  - data_breach_vulns

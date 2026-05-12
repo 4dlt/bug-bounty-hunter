@@ -1,0 +1,38 @@
+# v3.2 — Maps finding class to required evidence pattern.
+# Validator's Q1 check reads this to apply class-aware rules instead of binary browser_verified.
+
+browser_required:
+  - xss_reflected
+  - xss_stored
+  - xss_dom
+  - open_redirect_client
+  - csrf
+  - csp_bypass_via_dom
+  - prototype_pollution
+  - postmessage_xss
+  - dom_clobbering
+
+oob_or_timing_required:
+  - ssrf
+  - sql_injection_blind
+  - sql_injection_time
+  - command_injection_blind
+  - xxe_blind
+  # Required: validation_evidence.oob_callback_received OR .timing_differential_ms >= 3000
+
+response_body_proof:
+  - info_disclosure
+  - source_map_exposed
+  - sensitive_data_in_response
+  - exposed_credentials
+  - exposed_pii_in_api_response
+  - verbose_error_message_with_data
+  # Required: validation_evidence.response_excerpt non-empty
+
+server_state_proof:
+  - idor
+  - mass_assignment
+  - business_logic_bypass
+  - race_condition
+  - auth_bypass_server_side
+  # Required: validation_evidence.before_after_state showing observable state change

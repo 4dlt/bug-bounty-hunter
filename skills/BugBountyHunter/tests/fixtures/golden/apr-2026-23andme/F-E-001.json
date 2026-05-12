@@ -1,0 +1,27 @@
+{
+  "id": "F-E-001",
+  "agent": "E",
+  "class": "workflow_info_disclosure",
+  "severity": "P4",
+  "severity_rationale": "Reproducible unhandled server exceptions (HTTP 500 with 'exception: Server Error' body) on 6 state-changing POST endpoints with authenticated but unprivileged account. Reveals missing structured validation layer and provides oracle for field enumeration. No PII leak. Standalone P4.",
+  "validated": true,
+  "validation_method": "Curl — 6 endpoints consistently 500 with identical JSON body shape.",
+  "endpoint": "/p/{pid}/tools/invite/create/, /p/{pid}/tools/blocks/, /p/{pid}/entity_dismissal/ (multiple state-changing POST endpoints)",
+  "method": "POST",
+  "response_summary": "Consistent HTTP 500 with JSON body {\"status\": 500, \"exception\": \"Server Error\"} instead of a structured validation error. No stack leak but oracle on missing-field enumeration.",
+  "impact": "Attacker can blindly enumerate required request fields on state-changing endpoints via 500-vs-200 differential. Indicates absence of input-validation middleware on at least 6 endpoints.",
+  "chain": null,
+  "bounty_estimate": "$200 - $600",
+  "remediation": "Add structured input validation returning 400 with field-level error descriptions; catch exceptions in middleware and return sanitized 4xx.",
+  "cwe": "CWE-209 / CWE-755",
+  "cvss_estimate": "3.1",
+  "reportability_audit": {
+    "Q1_evidence": "PASS — curl",
+    "Q2_not_excluded": "PASS",
+    "Q3_impact_demonstrated": "PASS — oracle differential demonstrated",
+    "Q4_not_low_class_solo": "PASS",
+    "composability": "round=2",
+    "prior_report_similarity": "0.0",
+    "gate_passed": true
+  }
+}
