@@ -122,9 +122,10 @@ async function pentest(target?: string): Promise<void> {
   await writeState(workdir, state);
   console.log(`[pentest] stage: ${state.current_stage}`);
 
+  const logGap = coverageGapLogger(workdir);
   const plan = await acquireAuth(workdir, () => browserLogin(scope), {
     onCoverageGap: (gap) => {
-      void coverageGapLogger(workdir)(gap);
+      void logGap(gap);
       console.error(`[pentest] coverage_gap: ${gap.reason}`);
     },
   });
@@ -143,7 +144,7 @@ async function pentest(target?: string): Promise<void> {
 }
 
 const COMMANDS: Record<string, (arg?: string) => Promise<void>> = {
-  hello: () => hello(),
+  hello,
   pentest,
 };
 

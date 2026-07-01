@@ -103,6 +103,15 @@ const MFA_PATTERNS = [
   /authenticator app/i,
 ];
 
+/** First pattern that matches `signal`, returned as its matched text. */
+function firstMatch(signal: string, patterns: RegExp[]): string | null {
+  for (const p of patterns) {
+    const m = signal.match(p);
+    if (m) return m[0];
+  }
+  return null;
+}
+
 /**
  * Inspect a login-response signal (page text, redirect URL, error body) for an
  * MFA or captcha challenge. Returns the obstacle, or null for an ordinary
@@ -110,14 +119,10 @@ const MFA_PATTERNS = [
  * harder-blocking obstacle.
  */
 export function detectAuthObstacle(signal: string): AuthObstacle | null {
-  for (const p of CAPTCHA_PATTERNS) {
-    const m = signal.match(p);
-    if (m) return { kind: "captcha", evidence: m[0] };
-  }
-  for (const p of MFA_PATTERNS) {
-    const m = signal.match(p);
-    if (m) return { kind: "mfa", evidence: m[0] };
-  }
+  const captcha = firstMatch(signal, CAPTCHA_PATTERNS);
+  if (captcha) return { kind: "captcha", evidence: captcha };
+  const mfa = firstMatch(signal, MFA_PATTERNS);
+  if (mfa) return { kind: "mfa", evidence: mfa };
   return null;
 }
 
@@ -157,19 +162,18 @@ export function planAuthTransition(outcome: LoginOutcome): AuthPlan {
           reason: "auth_captured_no_session",
         },
       };
-    case "obstacle":
+    case "obstacle": {
+      const reason = `auth_${outcome.obstacle.kind}`;
       return {
-        event: {
-          type: "halt",
-          reason: `auth_${outcome.obstacle.kind}`,
-        },
+        event: { type: "halt", reason },
         gap: {
           kind: "coverage_gap",
           url: null,
           host: null,
-          reason: `auth_${outcome.obstacle.kind}: ${outcome.obstacle.evidence}`,
+          reason: `${reason}: ${outcome.obstacle.evidence}`,
         },
       };
+    }
     case "failed":
       return { event: { type: "halt", reason: `auth_failed: ${outcome.reason}` } };
   }
