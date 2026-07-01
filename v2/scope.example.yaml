@@ -1,0 +1,35 @@
+# Example scope.yaml for `bbh pentest`. Copy to ./scope.yaml and edit.
+# Validated by ScopeSchema (v2/orchestrator/src/scope.ts) on load.
+
+target: http://localhost:3000
+
+# In-scope host globs. `*` matches one or more chars; dots are literal, so
+# `*.target.com` matches api.target.com but NOT the apex target.com.
+# If omitted, only the target's own host is in scope.
+scope:
+  - localhost
+
+# Out-of-scope host globs. Always win over `scope` — a broad in-scope glob can
+# never re-admit a host listed here. Blocked requests are logged as
+# coverage_gap and never sent.
+out_of_scope: []
+
+# Test-account credentials the auth-acquire agent (Stage 0) logs in with.
+# method: "none" runs the engagement unauthenticated.
+auth:
+  method: form
+  login_url: http://localhost:3000/#/login
+  username: test@juice-sh.op
+  password: "hunter2"
+  # Optional substring proving login succeeded (page text / token name).
+  success_check: bid
+
+# Minimum severity band a hypothesis must clear to be deep-hunted.
+min_payout_band: P3
+
+# Runaway-protection budgets. Generous defaults; the engagement halts cleanly
+# when any one threshold is hit.
+budget:
+  max_probes: 10000
+  max_llm_calls: 2000
+  max_minutes: 480

@@ -50,19 +50,16 @@ export const StateSchema = z.object({
 });
 export type State = z.infer<typeof StateSchema>;
 
-export const BudgetSchema = z.object({
-  max_probes: z.number().int().positive().default(10000),
-  max_llm_calls: z.number().int().positive().default(2000),
-  max_minutes: z.number().int().positive().default(480),
-});
-
-export const ScopeSchema = z.object({
-  target: z.string().min(1),
-  allowed_domains: z.array(z.string()).default([]),
-  min_payout_band: z.string().default("P3"),
-  budget: BudgetSchema.prefault({}),
-});
-export type Scope = z.infer<typeof ScopeSchema>;
+// Scope + budget schemas live in scope.ts (alongside the allowlist that
+// enforces them). Re-exported here so existing state.ts importers keep working.
+export {
+  BudgetSchema,
+  ScopeSchema,
+  AuthSchema,
+  type Budget,
+  type Scope,
+  type Auth,
+} from "./scope.ts";
 
 // ---------------------------------------------------------------------------
 // Reducer

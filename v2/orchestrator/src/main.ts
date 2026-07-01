@@ -9,8 +9,20 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { complete } from "./llm.ts";
-import { initialState, readState, writeState } from "./state.ts";
+import {
+  initialState,
+  readState,
+  transition,
+  writeState,
+} from "./state.ts";
 import { startTokenServer, TokenBucket } from "./ratelimit.ts";
+import {
+  loadScope,
+  coverageGapLogger,
+  ScopeSchema,
+  type Scope,
+} from "./scope.ts";
+import { acquireAuth, type LoginOutcome } from "./auth.ts";
 import {
   JUICE_SHOP_URL,
   composeDown,
@@ -61,18 +73,88 @@ async function hello(): Promise<void> {
   }
 }
 
-const COMMANDS: Record<string, () => Promise<void>> = {
-  hello,
+/** Load scope.yaml from cwd, or synthesize a minimal target-only scope. */
+async function resolveScope(target: string): Promise<Scope> {
+  const scopePath = path.resolve(process.cwd(), "scope.yaml");
+  try {
+    const text = await fs.readFile(scopePath, "utf8");
+    console.log(`[pentest] loaded scope from ${scopePath}`);
+    return loadScope(text);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+    console.log(
+      `[pentest] no scope.yaml found; synthesizing a target-only scope for ${target}`,
+    );
+    return ScopeSchema.parse({ target });
+  }
+}
+
+/**
+ * Drive the dev-browser login. Delegated to the auth-acquire agent
+ * (v2/prompts/auth-acquire.md) which needs a headed dev-browser — not wired in
+ * this slice. Fails gracefully at that boundary, exactly as `hello` does at the
+ * docker boundary, so the pipeline wiring can still be exercised end-to-end.
+ */
+async function browserLogin(_scope: Scope): Promise<LoginOutcome> {
+  return {
+    status: "failed",
+    reason:
+      "dev-browser login not wired in Slice 1 — see v2/prompts/auth-acquire.md",
+  };
+}
+
+/**
+ * Stage 0 driver. Reads scope, initializes state, runs the auth stage through
+ * the scope-enforced login, and advances `auth → recon` only on a successful
+ * session artifact. Halts (with a coverage_gap for MFA/captcha) otherwise.
+ */
+async function pentest(target?: string): Promise<void> {
+  if (!target) {
+    console.error("Usage: bbh pentest <target-url>");
+    throw new Error("missing target");
+  }
+  const scope = await resolveScope(target);
+
+  const workdir = await fs.mkdtemp(path.join(os.tmpdir(), "bbh-pentest-"));
+  console.log(`[pentest] workdir: ${workdir}`);
+
+  let state = initialState(`pentest-${path.basename(workdir)}`, target);
+  await writeState(workdir, state);
+  console.log(`[pentest] stage: ${state.current_stage}`);
+
+  const plan = await acquireAuth(workdir, () => browserLogin(scope), {
+    onCoverageGap: (gap) => {
+      void coverageGapLogger(workdir)(gap);
+      console.error(`[pentest] coverage_gap: ${gap.reason}`);
+    },
+  });
+
+  state = transition(state, plan.event);
+  await writeState(workdir, state);
+
+  if (plan.event.type === "advance") {
+    console.log(`[pentest] auth OK -> advanced to ${state.current_stage}`);
+  } else {
+    console.error(
+      `[pentest] auth halted: ${plan.event.type === "halt" ? plan.event.reason : ""}`,
+    );
+    console.error(`[pentest] state: ${state.status}`);
+  }
+}
+
+const COMMANDS: Record<string, (arg?: string) => Promise<void>> = {
+  hello: () => hello(),
+  pentest,
 };
 
 async function main(argv: string[]): Promise<number> {
   const command = argv[0];
   if (!command || !(command in COMMANDS)) {
     const known = Object.keys(COMMANDS).join(", ");
-    console.error(`Usage: bbh <command>\nCommands: ${known}`);
+    console.error(`Usage: bbh <command> [args]\nCommands: ${known}`);
     return command ? 1 : 0;
   }
-  await COMMANDS[command]!();
+  await COMMANDS[command]!(argv[1]);
   return 0;
 }
 
