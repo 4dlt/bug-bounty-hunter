@@ -29,18 +29,12 @@ export const STAGES = [
 export const StageSchema = z.enum(STAGES);
 export type Stage = z.infer<typeof StageSchema>;
 
-/** Linear progression the `advance` event walks through. */
-const PIPELINE: Stage[] = [
-  "auth",
-  "recon",
-  "plan",
-  "sweep",
-  "author",
-  "review",
-  "verify",
-  "report",
-  "done",
-];
+/**
+ * Linear progression the `advance` event walks through: every stage except the
+ * non-linear `halted`, which is reachable only via the `halt` event. Derived
+ * from STAGES so the two lists cannot drift out of order.
+ */
+const PIPELINE: Stage[] = STAGES.filter((stage) => stage !== "halted");
 
 // ---------------------------------------------------------------------------
 // Zod schemas
@@ -91,7 +85,8 @@ function assertNever(x: never): never {
  */
 export function transition(state: State, event: Event): State {
   if (state.current_stage === "done" || state.current_stage === "halted") {
-    // Terminal stages absorb everything but an explicit halt no-ops.
+    // Terminal stages reject all events, except re-halting an already-halted
+    // state, which is an idempotent no-op.
     if (event.type === "halt" && state.current_stage === "halted") return state;
     throw new Error(
       `No transitions out of terminal stage "${state.current_stage}"`,
