@@ -21,6 +21,7 @@ import {
   coverageGapLogger,
   ScopeSchema,
   type Scope,
+  type CoverageGap,
 } from "./scope.ts";
 import { acquireAuth, type LoginOutcome } from "./auth.ts";
 import {
@@ -147,11 +148,12 @@ async function pentest(target?: string): Promise<void> {
   console.log(`[pentest] stage: ${state.current_stage}`);
 
   const logGap = coverageGapLogger(workdir);
+  const reportGap = (gap: CoverageGap): void => {
+    void logGap(gap);
+    console.error(`[pentest] coverage_gap: ${gap.reason}`);
+  };
   const plan = await acquireAuth(workdir, () => browserLogin(scope), {
-    onCoverageGap: (gap) => {
-      void logGap(gap);
-      console.error(`[pentest] coverage_gap: ${gap.reason}`);
-    },
+    onCoverageGap: reportGap,
   });
 
   state = transition(state, plan.event);
@@ -176,10 +178,7 @@ async function pentest(target?: string): Promise<void> {
       scope,
       runner: reconAgentStub,
       takeToken: () => acquireToken(tokens.url),
-      onCoverageGap: (gap) => {
-        void logGap(gap);
-        console.error(`[pentest] coverage_gap: ${gap.reason}`);
-      },
+      onCoverageGap: reportGap,
     });
     state = transition(state, recon.event);
     await writeState(workdir, state);
