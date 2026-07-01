@@ -1,0 +1,19 @@
+# Local OWASP Juice Shop — the v2 smoke / development test target.
+#
+#   docker compose -f v2/test-target/docker-compose.yml up -d
+#   docker compose -f v2/test-target/docker-compose.yml down
+#
+# `bbh hello` brings this up and tears it down automatically.
+services:
+  juice-shop:
+    image: bkimminich/juice-shop:v17.1.1
+    container_name: bbh-juice-shop
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:3000"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 20s
