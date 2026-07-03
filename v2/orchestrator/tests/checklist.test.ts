@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { ScopeSchema, type Scope } from "../src/scope.ts";
-import { writeFinding, HunterFindingSchema, type HunterFinding } from "../src/hunters/framework.ts";
+import { writeFinding, findingsDir, HunterFindingSchema, type HunterFinding } from "../src/hunters/framework.ts";
 import {
   runAuthor,
   readFindings,
@@ -100,6 +100,17 @@ describe("readFindings + groupFindingsByClass", () => {
 
   it("returns [] when there are no findings", async () => {
     expect(await readFindings(workdir)).toEqual([]);
+  });
+
+  it("skips a half-written finding.json instead of crashing", async () => {
+    await seedFinding("f-0001", finding({ vuln_class: "idor" }));
+    // A truncated finding.json (crashed mid-write) must be skipped, not thrown.
+    const halfWritten = path.join(findingsDir(workdir), "f-0002", "finding.json");
+    await fs.mkdir(path.dirname(halfWritten), { recursive: true });
+    await fs.writeFile(halfWritten, '{"id": "f-0002", "title": "trunc', "utf8");
+
+    const found = await readFindings(workdir);
+    expect(found.map((f) => f.id)).toEqual(["f-0001"]);
   });
 });
 

@@ -73,14 +73,15 @@ export async function readFindings(workdir: string): Promise<FindingMeta[]> {
   const out: FindingMeta[] = [];
   for (const id of entries.sort()) {
     const file = path.join(findingsDir(workdir), id, "finding.json");
-    let raw: string;
     try {
-      raw = await fs.readFile(file, "utf8");
+      // The JSON.parse is inside the try on purpose: a truncated/half-written
+      // finding.json throws a SyntaxError here, which is skipped just like a
+      // missing file — an incomplete finding dir cannot crash the Author.
+      const parsed = FindingMetaSchema.safeParse(JSON.parse(await fs.readFile(file, "utf8")));
+      if (parsed.success) out.push(parsed.data);
     } catch {
-      continue; // not a finding dir, or no metadata yet
+      continue; // not a finding dir, no metadata yet, or a half-written file
     }
-    const parsed = FindingMetaSchema.safeParse(JSON.parse(raw));
-    if (parsed.success) out.push(parsed.data);
   }
   return out;
 }
