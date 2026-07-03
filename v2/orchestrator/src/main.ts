@@ -15,14 +15,20 @@ import {
   transition,
   writeState,
 } from "./state.ts";
-import { startTokenServer, TokenBucket } from "./ratelimit.ts";
+import { acquireToken, startTokenServer, TokenBucket } from "./ratelimit.ts";
 import {
   loadScope,
   coverageGapLogger,
   ScopeSchema,
   type Scope,
+  type CoverageGap,
 } from "./scope.ts";
 import { acquireAuth, type LoginOutcome } from "./auth.ts";
+import {
+  runRecon,
+  type ReconAgentContext,
+  type ReconResult,
+} from "./recon.ts";
 import {
   JUICE_SHOP_URL,
   composeDown,
@@ -104,9 +110,28 @@ async function browserLogin(_scope: Scope): Promise<LoginOutcome> {
 }
 
 /**
- * Stage 0 driver. Reads scope, initializes state, runs the auth stage through
- * the scope-enforced login, and advances `auth → recon` only on a successful
- * session artifact. Halts (with a coverage_gap for MFA/captcha) otherwise.
+ * Run one recon agent (R1-R4). Delegated to the spawned agent driven by
+ * `v2/prompts/recon-r{1..4}-*.md`, which crawls / scans / analyses through the
+ * scope-enforced fetch and the governor's token endpoint — not wired in this
+ * slice. Returns an empty result (with a note) so the pipeline advances
+ * `recon → plan` gracefully, exactly as `browserLogin` stubs Stage 0.
+ */
+async function reconAgentStub(ctx: ReconAgentContext): Promise<ReconResult> {
+  return {
+    agent: ctx.agent,
+    endpoints: [],
+    tech: {},
+    notes: [
+      `recon agent ${ctx.agent} not wired in Slice 2 — see v2/prompts/recon-*.md`,
+    ],
+  };
+}
+
+/**
+ * Stage 0 + Stage 1 driver. Reads scope, initializes state, runs the auth stage
+ * through the scope-enforced login, and — on a successful session — runs Stage 1
+ * recon (R1-R4 in parallel), merging into `recon/endpoints.json` +
+ * `recon/surfaces.json` before advancing `recon → plan`.
  */
 async function pentest(target?: string): Promise<void> {
   if (!target) {
@@ -123,23 +148,47 @@ async function pentest(target?: string): Promise<void> {
   console.log(`[pentest] stage: ${state.current_stage}`);
 
   const logGap = coverageGapLogger(workdir);
+  const reportGap = (gap: CoverageGap): void => {
+    void logGap(gap);
+    console.error(`[pentest] coverage_gap: ${gap.reason}`);
+  };
   const plan = await acquireAuth(workdir, () => browserLogin(scope), {
-    onCoverageGap: (gap) => {
-      void logGap(gap);
-      console.error(`[pentest] coverage_gap: ${gap.reason}`);
-    },
+    onCoverageGap: reportGap,
   });
 
   state = transition(state, plan.event);
   await writeState(workdir, state);
 
-  if (plan.event.type === "advance") {
-    console.log(`[pentest] auth OK -> advanced to ${state.current_stage}`);
-  } else {
+  if (plan.event.type !== "advance") {
     console.error(
       `[pentest] auth halted: ${plan.event.type === "halt" ? plan.event.reason : ""}`,
     );
     console.error(`[pentest] state: ${state.status}`);
+    return;
+  }
+  console.log(`[pentest] auth OK -> advanced to ${state.current_stage}`);
+
+  // Stage 1 — parallel recon. Consumes rate-limit tokens from the governor and
+  // is scope-enforced per agent. Best-effort: a failed agent logs a
+  // coverage_gap and the survivors still merge before advancing recon -> plan.
+  const tokens = await startTokenServer(new TokenBucket(5));
+  console.log(`[pentest] token endpoint: ${tokens.url}/token`);
+  try {
+    const recon = await runRecon(workdir, {
+      scope,
+      runner: reconAgentStub,
+      takeToken: () => acquireToken(tokens.url),
+      onCoverageGap: reportGap,
+    });
+    state = transition(state, recon.event);
+    await writeState(workdir, state);
+    console.log(
+      `[pentest] recon done: ${recon.endpoints.length} endpoints, ` +
+        `${recon.surfaces.length} surfaces, ${recon.failed.length} agent failure(s)` +
+        ` -> advanced to ${state.current_stage}`,
+    );
+  } finally {
+    await tokens.close().catch(() => {});
   }
 }
 

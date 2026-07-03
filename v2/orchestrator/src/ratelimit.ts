@@ -57,6 +57,24 @@ export interface TokenServer {
 }
 
 /**
+ * Client side of the governor: request one token from a running token server.
+ * Returns true on a 200 grant, false on a 429 (bucket empty) or any transport
+ * error — a dead governor must never crash a recon agent, only slow it. The
+ * `fetchImpl` seam keeps this unit-testable without a live server.
+ */
+export async function acquireToken(
+  baseUrl: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<boolean> {
+  try {
+    const res = await fetchImpl(`${baseUrl}/token`);
+    return res.status === 200;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Start the token endpoint. GET /token returns 200 `{ "token": true }` while
  * the bucket has capacity and 429 `{ "token": false }` when it is empty.
  * Binds to 127.0.0.1 only. Pass port 0 to get an ephemeral port.
