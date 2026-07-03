@@ -14,6 +14,7 @@ import {
   readState,
   transition,
   writeState,
+  type State,
 } from "./state.ts";
 import { acquireToken, startTokenServer, TokenBucket } from "./ratelimit.ts";
 import {
@@ -29,6 +30,7 @@ import {
   type ReconAgentContext,
   type ReconResult,
 } from "./recon.ts";
+import { runPlan, type PlanInput, type PlanProposal } from "./plan.ts";
 import {
   JUICE_SHOP_URL,
   composeDown,
@@ -128,10 +130,69 @@ async function reconAgentStub(ctx: ReconAgentContext): Promise<ReconResult> {
 }
 
 /**
- * Stage 0 + Stage 1 driver. Reads scope, initializes state, runs the auth stage
- * through the scope-enforced login, and — on a successful session — runs Stage 1
- * recon (R1-R4 in parallel), merging into `recon/endpoints.json` +
- * `recon/surfaces.json` before advancing `recon → plan`.
+ * Run the Plan agent (Stage 2). Delegated to the smart (Opus) agent driven by
+ * `v2/prompts/plan.md`, which reads the recon map and emits the hunt plan +
+ * a-priori hypotheses — not wired in this slice. Returns an empty proposal (the
+ * orchestrator still guarantees per-surface coverage and advances `plan →
+ * sweep`), exactly as `reconAgentStub` stubs Stage 1.
+ */
+async function planAgentStub(_input: PlanInput): Promise<PlanProposal> {
+  return { cells: [], hypotheses: [] };
+}
+
+/**
+ * Stage 2 driver, reused by the standalone `plan` command and the full
+ * `pentest` pipeline: run the Plan agent over the recon map and transition
+ * `plan → sweep`.
+ */
+async function runPlanStage(
+  workdir: string,
+  scope: Scope,
+  state: State,
+): Promise<State> {
+  const plan = await runPlan(workdir, { scope, runner: planAgentStub });
+  const next = transition(state, plan.event);
+  await writeState(workdir, next);
+  console.log(
+    `[plan] hunt plan: ${plan.cells.length} cell(s), ` +
+      `${plan.hypotheses.length} a-priori hypothesis(es) seeded ` +
+      `(${plan.droppedCells} incompatible cell(s), ${plan.droppedHypotheses} below-band hypothesis(es) dropped)` +
+      ` -> advanced to ${next.current_stage}`,
+  );
+  return next;
+}
+
+/**
+ * `bbh plan <target>` — run only Stage 2, so the plan prompt can be iterated on
+ * without re-running auth + recon. Reads the recon artifacts from the workdir
+ * (set `BBH_WORKDIR` to point at an existing engagement; otherwise a fresh temp
+ * dir is used and the plan comes out empty but valid).
+ */
+async function plan(target?: string): Promise<void> {
+  if (!target) {
+    console.error("Usage: bbh plan <target-url>");
+    throw new Error("missing target");
+  }
+  const scope = await resolveScope(target);
+  const workdir =
+    process.env.BBH_WORKDIR ??
+    (await fs.mkdtemp(path.join(os.tmpdir(), "bbh-plan-")));
+  console.log(`[plan] workdir: ${workdir}`);
+
+  let state = await readState(workdir).catch(() =>
+    initialState(`plan-${path.basename(workdir)}`, target),
+  );
+  // The standalone command enters at the plan stage regardless of prior state.
+  state = { ...state, current_stage: "plan" };
+  await writeState(workdir, state);
+  await runPlanStage(workdir, scope, state);
+}
+
+/**
+ * Stage 0 + Stage 1 + Stage 2 driver. Reads scope, initializes state, runs the
+ * auth stage through the scope-enforced login, and — on a successful session —
+ * runs Stage 1 recon (R1-R4 in parallel) then Stage 2 Plan (hunt plan +
+ * a-priori hypotheses), advancing `auth → recon → plan → sweep`.
  */
 async function pentest(target?: string): Promise<void> {
   if (!target) {
@@ -187,6 +248,10 @@ async function pentest(target?: string): Promise<void> {
         `${recon.surfaces.length} surfaces, ${recon.failed.length} agent failure(s)` +
         ` -> advanced to ${state.current_stage}`,
     );
+
+    // Stage 2 — Plan. Reads the recon map and emits hunt-plan.json +
+    // a-priori hypotheses, advancing plan -> sweep.
+    state = await runPlanStage(workdir, scope, state);
   } finally {
     await tokens.close().catch(() => {});
   }
@@ -195,6 +260,7 @@ async function pentest(target?: string): Promise<void> {
 const COMMANDS: Record<string, (arg?: string) => Promise<void>> = {
   hello,
   pentest,
+  plan,
 };
 
 async function main(argv: string[]): Promise<number> {
