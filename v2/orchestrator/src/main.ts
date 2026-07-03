@@ -32,12 +32,13 @@ import {
 } from "./recon.ts";
 import { runPlan, readHuntPlan, type PlanInput, type PlanProposal } from "./plan.ts";
 import {
-  runHunter,
   type HunterContext,
-  type HunterFinding,
+  type HunterYield,
+  type HunterRunner,
   type ProbeTransport,
   type Payload,
 } from "./hunters/framework.ts";
+import { runSweep } from "./hunters/sweep.ts";
 import {
   JUICE_SHOP_URL,
   composeDown,
@@ -185,8 +186,14 @@ const IDOR_PAYLOADS: Payload[] = [
  * wired in this slice. Returns an empty result so the sweep advances end-to-end,
  * exactly as `reconAgentStub`/`planAgentStub` stub the earlier stages.
  */
-async function hunterStub(_ctx: HunterContext): Promise<{ findings: HunterFinding[] }> {
+const hunterStub: HunterRunner = async (_ctx: HunterContext): Promise<HunterYield> => {
   return { findings: [] };
+};
+
+/** Payload corpus per class. Only IDOR has a corpus this slice; the real hunters
+ *  draw from the v1 `Payloads/*.yaml` set. */
+function payloadsForClass(vulnClass: string): Payload[] {
+  return vulnClass === "idor" ? IDOR_PAYLOADS : [];
 }
 
 /**
@@ -200,58 +207,53 @@ const stubTransport: ProbeTransport = async () => ({
 });
 
 /**
- * Stage 3 (IDOR only, this slice) driver, reused by the standalone `sweep`
- * command and the full `pentest` pipeline: run the IDOR hunter over every `idor`
- * cell of the hunt plan (firing probes through the dedupe+token+ledger path,
- * writing `findings/<id>/`), then transition `sweep → author`.
+ * Stage 3 driver, reused by the standalone `sweep` command and the full
+ * `pentest` pipeline: run the parallel Tier 1 sweep over EVERY `(surface × class)`
+ * cell of the hunt plan (bounded by `scope.sweep_concurrency`), seeding the
+ * reactive hypothesis stream and deriving `coverage.json`, then transition
+ * `sweep → author`. A cell whose class has no hunter prompt logs a coverage_gap.
  */
 async function runSweepStage(
   workdir: string,
   scope: Scope,
   state: State,
   takeToken: () => Promise<boolean>,
+  reportGap: (gap: CoverageGap) => void,
 ): Promise<State> {
   const cells = await readHuntPlan(workdir).catch(() => []);
-  const idorCells = cells.filter((c) => c.vuln_class === "idor");
 
-  let probes = 0;
-  let findings = 0;
-  for (const cell of idorCells) {
-    const outcome = await runHunter(workdir, {
-      runner: hunterStub,
-      scope,
-      surface: cell.surface,
-      vuln_class: "idor",
-      endpoints: cell.relevant_endpoints,
-      payloads: IDOR_PAYLOADS,
-      transport: stubTransport,
-      pass: state.current_pass,
-      takeToken,
-    });
-    probes += outcome.probesFired;
-    findings += outcome.findings.length;
-  }
+  const outcome = await runSweep(workdir, {
+    scope,
+    cells,
+    // Every cell gets the same stub agent this slice; runSweep gaps a cell whose
+    // class has no prompt on disk. The real wiring resolves a Sonnet agent per
+    // class from `hunters/<class>.md`.
+    runnerFor: () => hunterStub,
+    payloadsFor: (cell) => payloadsForClass(cell.vuln_class),
+    transport: stubTransport,
+    pass: state.current_pass,
+    takeToken,
+    onCoverageGap: reportGap,
+  });
 
-  const next = transition(state, { type: "advance" });
+  const next = transition(state, outcome.event);
   await writeState(workdir, next);
   console.log(
-    `[sweep] idor: ${idorCells.length} cell(s), ${probes} probe(s) logged, ` +
-      `${findings} finding(s) -> advanced to ${next.current_stage}`,
+    `[sweep] ${outcome.cellsRun} cell(s) run, ${outcome.cellsGapped} gapped, ` +
+      `${outcome.probesFired} probe(s) logged, ${outcome.findings.length} finding(s), ` +
+      `${outcome.reactiveHypotheses.length} reactive hypothesis(es), ` +
+      `${outcome.gaps} coverage GAP(s) (peak concurrency ${outcome.maxConcurrency}) ` +
+      `-> advanced to ${next.current_stage}`,
   );
   return next;
 }
 
 /**
- * `bbh sweep --class idor [target]` — run only the Tier 1 IDOR hunter over an
- * existing engagement's hunt plan (set `BBH_WORKDIR` to point at it), so the
- * hunter + prompt can be iterated on without re-running auth/recon/plan.
+ * `bbh sweep [target]` — run only the Tier 1 sweep over an existing engagement's
+ * hunt plan (set `BBH_WORKDIR` to point at it), so the hunters + prompts can be
+ * iterated on without re-running auth/recon/plan.
  */
 async function sweep(args: string[]): Promise<void> {
-  const cls = flagValue(args, "--class") ?? "idor";
-  if (cls !== "idor") {
-    console.error(`Only --class idor is implemented in this slice (got "${cls}")`);
-    throw new Error("unsupported hunter class");
-  }
   const target = positional(args) ?? JUICE_SHOP_URL;
   const scope = await resolveScope(target);
 
@@ -267,10 +269,16 @@ async function sweep(args: string[]): Promise<void> {
   state = { ...state, current_stage: "sweep" };
   await writeState(workdir, state);
 
+  const logGap = coverageGapLogger(workdir);
+  const reportGap = (gap: CoverageGap): void => {
+    void logGap(gap);
+    console.error(`[sweep] coverage_gap: ${gap.reason}`);
+  };
+
   const tokens = await startTokenServer(new TokenBucket(5));
   console.log(`[sweep] token endpoint: ${tokens.url}/token`);
   try {
-    await runSweepStage(workdir, scope, state, () => acquireToken(tokens.url));
+    await runSweepStage(workdir, scope, state, () => acquireToken(tokens.url), reportGap);
   } finally {
     await tokens.close().catch(() => {});
   }
@@ -391,10 +399,17 @@ async function pentest(args: string[]): Promise<void> {
     // a-priori hypotheses, advancing plan -> sweep.
     state = await runPlanStage(workdir, scope, state);
 
-    // Stage 3 — Tier 1 sweep (IDOR only, this slice). Runs the IDOR hunter over
-    // each idor cell, appending probes to ledger.jsonl + writing findings/<id>/,
+    // Stage 3 — Tier 1 parallel sweep. Runs a hunter per (surface × class) cell
+    // (bounded by scope.sweep_concurrency), appending probes to ledger.jsonl +
+    // writing findings/<id>/, seeding reactive hypotheses, deriving coverage.json,
     // advancing sweep -> author.
-    state = await runSweepStage(workdir, scope, state, () => acquireToken(tokens.url));
+    state = await runSweepStage(
+      workdir,
+      scope,
+      state,
+      () => acquireToken(tokens.url),
+      reportGap,
+    );
   } finally {
     await tokens.close().catch(() => {});
   }

@@ -13,6 +13,10 @@ import {
   nextFindingSeq,
   runHunter,
   HunterFindingSchema,
+  HUNTER_CLASSES,
+  HUNTER_CLASS_ALIASES,
+  resolveHunterClass,
+  hunterPromptExists,
   type ProbeRequest,
   type ProbeTransport,
   type HunterContext,
@@ -85,6 +89,37 @@ describe("loadHunterPrompt / renderHunterPrompt", () => {
     const rendered = await renderHunterPrompt("idor", vars);
     expect(rendered).toContain("rest");
     expect(rendered).not.toMatch(/\{\{.*?\}\}/);
+  });
+});
+
+describe("hunter class registry", () => {
+  it("ships all 13 Tier 1 hunter prompts and they load without error", async () => {
+    expect(HUNTER_CLASSES).toHaveLength(13);
+    for (const cls of HUNTER_CLASSES) {
+      const prompt = await loadHunterPrompt(cls);
+      // Every prompt renders with the standard cell vars and has no dangling {{var}}.
+      const vars: Record<string, string> = {};
+      for (const name of templateVars(prompt)) vars[name] = "x";
+      expect(renderTemplate(prompt, vars)).not.toMatch(/\{\{\s*[\w.]+\s*\}\}/);
+    }
+  });
+
+  it("resolves the Plan agent's coarser class names onto a concrete hunter", () => {
+    expect(resolveHunterClass("xss")).toBe("xss_reflected");
+    expect(resolveHunterClass("auth")).toBe("auth_bypass");
+    expect(resolveHunterClass("path_traversal")).toBe("lfi");
+    // An unaliased class resolves to itself.
+    expect(resolveHunterClass("idor")).toBe("idor");
+    // Every alias target is a real hunter class.
+    for (const target of Object.values(HUNTER_CLASS_ALIASES)) {
+      expect(HUNTER_CLASSES).toContain(target);
+    }
+  });
+
+  it("hunterPromptExists follows resolution and is false for an unbuilt class", async () => {
+    expect(await hunterPromptExists("idor")).toBe(true);
+    expect(await hunterPromptExists("xss")).toBe(true); // -> xss_reflected.md
+    expect(await hunterPromptExists("csrf")).toBe(false); // no hunter built
   });
 });
 
@@ -324,5 +359,22 @@ describe("runHunter", () => {
       opts({ runner: async (ctx) => (await ctx.takeToken(), { findings: [] }), takeToken: async () => (took++, true) }),
     );
     expect(took).toBe(1);
+  });
+
+  it("surfaces reactive hypotheses, filling an omitted class from the cell", async () => {
+    const out = await runHunter(
+      dir,
+      opts({
+        runner: async () => ({
+          findings: [],
+          hypotheses: [
+            { target_endpoint: "/api/Users/2", hypothesis: "sequential ids", signal_evidence: "200 for id 2" },
+            { class: "sqli", target_endpoint: "/rest/search", hypothesis: "error leak", signal_evidence: "" },
+          ],
+        }),
+      }),
+    );
+    // Not stamped/persisted here — that is the sweep's job — but class-filled.
+    expect(out.reactiveHypotheses.map((h) => h.class)).toEqual(["idor", "sqli"]);
   });
 });

@@ -103,6 +103,63 @@ export async function loadHunterPrompt(
   }
 }
 
+// ---------------------------------------------------------------------------
+// Tier 1 hunter class registry + resolution
+// ---------------------------------------------------------------------------
+
+/**
+ * The Tier 1 hunter taxonomy: one prompt `hunters/<class>.md` ships per entry.
+ * These are the classes the sweep can actually dispatch a hunter for; a hunt
+ * plan cell whose class does not resolve to one of these is a coverage gap.
+ */
+export const HUNTER_CLASSES = [
+  "idor",
+  "xss_reflected",
+  "xss_stored",
+  "sqli",
+  "ssrf",
+  "auth_bypass",
+  "business_logic",
+  "file_upload",
+  "api",
+  "websocket",
+  "ssti",
+  "lfi",
+  "race_condition",
+] as const;
+export type HunterClass = (typeof HUNTER_CLASSES)[number];
+
+/**
+ * The Plan agent's vuln-class vocabulary (see `plan.ts` VULN_CLASSES) predates
+ * this taxonomy and uses a few coarser names. Map those synonyms onto the
+ * concrete Tier 1 hunter that owns the class so a plan cell keyed `xss` / `auth`
+ * / `path_traversal` still dispatches a real hunter rather than gapping. Any
+ * class not listed resolves to itself.
+ */
+export const HUNTER_CLASS_ALIASES: Record<string, HunterClass> = {
+  xss: "xss_reflected",
+  auth: "auth_bypass",
+  path_traversal: "lfi",
+};
+
+/** Resolve a hunt-plan cell class to the hunter prompt/agent that handles it. */
+export function resolveHunterClass(vulnClass: string): string {
+  return HUNTER_CLASS_ALIASES[vulnClass] ?? vulnClass;
+}
+
+/** True if a hunter prompt exists on disk for `vulnClass` (after resolution). */
+export async function hunterPromptExists(
+  vulnClass: string,
+  dir = defaultPromptsDir(),
+): Promise<boolean> {
+  try {
+    await fs.access(hunterPromptPath(resolveHunterClass(vulnClass), dir));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Load + render a class prompt with the supplied variables. */
 export async function renderHunterPrompt(
   vulnClass: string,
@@ -142,6 +199,22 @@ export const HunterFindingSchema = z.object({
   notes: z.string().optional(),
 });
 export type HunterFinding = z.infer<typeof HunterFindingSchema>;
+
+/**
+ * An "interesting signal" a hunter emits even when it produces no candidate
+ * finding — a parameter that reflects with mutation, a 403 with a telling
+ * header, a JWT with a modifiable `alg`, a predictable file name. The
+ * orchestrator stamps id / source / status before appending to
+ * `hypotheses.jsonl`; the hunter only supplies the signal. `class` is optional —
+ * when omitted the sweep fills it from the cell's vuln class.
+ */
+export const ReactiveHypothesisInputSchema = z.object({
+  class: z.string().min(1).optional(),
+  target_endpoint: z.string().min(1),
+  hypothesis: z.string().min(1),
+  signal_evidence: z.string().default(""),
+});
+export type ReactiveHypothesisInput = z.infer<typeof ReactiveHypothesisInputSchema>;
 
 // ---------------------------------------------------------------------------
 // Probe firer — dedupe + token + ledger, the end-to-end repeat guard
@@ -357,10 +430,15 @@ export interface HunterContext {
   takeToken: () => Promise<boolean>;
 }
 
+/** What one hunter run yields: candidate findings plus reactive hypotheses. */
+export interface HunterYield {
+  findings: HunterFinding[];
+  /** Interesting signals worth a Tier 2 deep dive (optional). */
+  hypotheses?: ReactiveHypothesisInput[];
+}
+
 /** Injected agent implementation: probe the cell via `ctx.fire`, return findings. */
-export type HunterRunner = (
-  ctx: HunterContext,
-) => Promise<{ findings: HunterFinding[] }>;
+export type HunterRunner = (ctx: HunterContext) => Promise<HunterYield>;
 
 export interface RunHunterOptions {
   runner: HunterRunner;
@@ -390,6 +468,10 @@ export interface HunterOutcome {
   probesFired: number;
   duplicatesSkipped: number;
   findings: WrittenFinding[];
+  /** Reactive signals the hunter emitted, class-filled but NOT yet stamped or
+   *  persisted — the sweep assigns ids and appends to `hypotheses.jsonl` so
+   *  parallel hunters never race on id sequencing. */
+  reactiveHypotheses: ReactiveHypothesisInput[];
 }
 
 /**
@@ -446,7 +528,8 @@ export async function runHunter(
     takeToken,
   };
 
-  const { findings: rawFindings } = await opts.runner(ctx);
+  const { findings: rawFindings, hypotheses: rawHypotheses } =
+    await opts.runner(ctx);
 
   const base = await nextFindingSeq(workdir);
   const findings: WrittenFinding[] = [];
@@ -457,6 +540,17 @@ export async function runHunter(
     findings.push({ id, dir, finding });
   }
 
+  // Normalize reactive hypotheses: fill an omitted class from the cell so every
+  // stored signal is class-attributed. Validation happens here; stamping and
+  // persistence are the sweep's job.
+  const reactiveHypotheses: ReactiveHypothesisInput[] = (rawHypotheses ?? []).map(
+    (h) =>
+      ReactiveHypothesisInputSchema.parse({
+        ...h,
+        class: h.class ?? opts.vuln_class,
+      }),
+  );
+
   return {
     agent,
     surface: opts.surface,
@@ -464,5 +558,6 @@ export async function runHunter(
     probesFired,
     duplicatesSkipped,
     findings,
+    reactiveHypotheses,
   };
 }
