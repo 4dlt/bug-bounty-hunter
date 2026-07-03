@@ -66,7 +66,7 @@ import {
   composeUp,
   waitForJuiceShop,
 } from "./test-target.ts";
-import { writeReport } from "./report/report.ts";
+import { writeReport, reportPath } from "./report/report.ts";
 import { BudgetTracker, haltForBudget } from "./budget.ts";
 import {
   planResume,
@@ -515,7 +515,7 @@ async function report(args: string[]): Promise<void> {
   }
   const state = await readState(workdir);
   const markdown = await writeReport(workdir, state);
-  console.log(`[report] wrote ${path.join(workdir, "report.md")}`);
+  console.log(`[report] wrote ${reportPath(workdir)}`);
   console.log(markdown);
 }
 

@@ -14,12 +14,7 @@ import path from "node:path";
 import { z } from "zod";
 import { findingDir } from "../hunters/framework.ts";
 import { FindingMetaSchema, type FindingMeta } from "../checklist/author.ts";
-import {
-  verdictsDir,
-  passVerdictPath,
-  VerdictSchema,
-  type Verdict,
-} from "../verify/verifier.ts";
+import { verdictsDir, VerdictSchema, type Verdict } from "../verify/verifier.ts";
 import { readyForHumanPath } from "../verify/stage.ts";
 import type { State } from "../state.ts";
 
@@ -116,11 +111,10 @@ export interface ConfirmedFinding {
 export async function readConfirmedFindings(
   workdir: string,
 ): Promise<ConfirmedFinding[]> {
+  const dir = verdictsDir(workdir);
   let files: string[] = [];
   try {
-    files = (await fs.readdir(verdictsDir(workdir))).filter((f) =>
-      /^pass-\d+\.json$/.test(f),
-    );
+    files = (await fs.readdir(dir)).filter((f) => /^pass-\d+\.json$/.test(f));
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return [];
     throw err;
@@ -133,7 +127,7 @@ export async function readConfirmedFindings(
     let parsed;
     try {
       parsed = PassVerdictsSchema.parse(
-        JSON.parse(await fs.readFile(path.join(verdictsDir(workdir), file), "utf8")),
+        JSON.parse(await fs.readFile(path.join(dir, file), "utf8")),
       );
     } catch {
       continue; // a half-written pass file cannot crash the report
@@ -192,7 +186,7 @@ export async function readEscalations(workdir: string): Promise<Escalation[]> {
 // Rendering (pure)
 // ---------------------------------------------------------------------------
 
-/** Whether a finding dir carries an `evidence/` subdir; picks the reference. */
+/** The report-relative path to a finding's `evidence/` subdir. */
 function evidenceRef(findingId: string): string {
   return `findings/${findingId}/evidence/`;
 }
