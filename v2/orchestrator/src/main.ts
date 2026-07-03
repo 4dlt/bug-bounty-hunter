@@ -39,6 +39,9 @@ import {
   type Payload,
 } from "./hunters/framework.ts";
 import { runSweep } from "./hunters/sweep.ts";
+import { runChecklistStage } from "./checklist/stage.ts";
+import type { AuthorInput, AuthorRunner } from "./checklist/author.ts";
+import type { ReviewerInput, ReviewAnswers, ReviewerRunner } from "./checklist/reviewer.ts";
 import {
   JUICE_SHOP_URL,
   composeDown,
@@ -249,6 +252,101 @@ async function runSweepStage(
 }
 
 /**
+ * Run the Checklist Author (Stage 3.5). Delegated to the smart (Opus) agent
+ * driven by `v2/prompts/checklist-author.md`, which reads the recon map + a
+ * sample of Tier 1 candidates + program rules and writes one checklist per
+ * class — not wired in this slice. Returns a minimal-but-structurally-valid
+ * checklist so the stage runs end-to-end (the Reviewer stub approves it).
+ */
+const authorStub: AuthorRunner = async (input: AuthorInput): Promise<string> => {
+  const fb = input.feedback?.length ? `\n\nRewrite addressed: ${input.feedback.join("; ")}` : "";
+  return (
+    `# ${input.vuln_class} verification checklist (STUB — see checklist-author.md)\n\n` +
+    `- Excludes program-documented exclusion classes.\n` +
+    `- Distinguishes a real bug from public-by-design endpoints.\n` +
+    `- Requires a non-trivial impact gate.\n` +
+    `\n${input.findings.length} candidate(s) observed on this class.` +
+    fb
+  );
+};
+
+/**
+ * Run the Checklist Reviewer (Stage 3.6). Delegated to the standard (Sonnet)
+ * agent driven by `v2/prompts/checklist-reviewer.md`, which answers three yes/no
+ * questions per checklist — not wired in this slice. The stub approves (all YES)
+ * so the pipeline advances `author → review → verify` end-to-end; a real
+ * Reviewer can reject and trigger the Author's one rewrite / the halt path.
+ */
+const reviewerStub: ReviewerRunner = async (_input: ReviewerInput): Promise<ReviewAnswers> => ({
+  excludes_documented_exclusions: true,
+  distinguishes_public_by_design: true,
+  has_impact_gate: true,
+  notes: "",
+});
+
+/**
+ * Stages 3.5 + 3.6 driver, reused by the standalone `checklist` command and the
+ * full `pentest` pipeline. The Author writes a checklist for every class with a
+ * Tier 1 candidate; the Reviewer approves-or-halts each (one Author rewrite on a
+ * first rejection). On full approval the state walks `author → review → verify`;
+ * on a second-attempt rejection the engagement halts with an operator report at
+ * `halted/checklist-rejection.md`.
+ */
+async function runChecklistStageDriver(
+  workdir: string,
+  scope: Scope,
+  state: State,
+): Promise<State> {
+  const outcome = await runChecklistStage(workdir, {
+    authorRunner: authorStub,
+    reviewerRunner: reviewerStub,
+    scope,
+  });
+
+  // The Author always finishes Stage 3.5: advance author → review first.
+  let next = transition(state, { type: "advance" });
+  await writeState(workdir, next);
+  // Then apply the Reviewer's verdict: advance review → verify, or halt.
+  next = transition(next, outcome.event);
+  await writeState(workdir, next);
+
+  const approved = outcome.reviews.filter((r) => r.approved).length;
+  console.log(
+    `[checklist] ${outcome.authored.length} checklist(s) authored, ` +
+      `${approved} approved` +
+      (outcome.halted ? `, HALTED (${outcome.haltReason})` : "") +
+      ` -> ${next.current_stage}`,
+  );
+  if (outcome.halted && outcome.rejectionReport) {
+    console.error(`[checklist] operator report: ${outcome.rejectionReport}`);
+  }
+  return next;
+}
+
+/**
+ * `bbh checklist [target]` — run only Stages 3.5 + 3.6 over an existing
+ * engagement (set `BBH_WORKDIR` to point at it), so the Author + Reviewer
+ * prompts can be iterated on without re-running the earlier stages.
+ */
+async function checklist(args: string[]): Promise<void> {
+  const target = positional(args) ?? JUICE_SHOP_URL;
+  const scope = await resolveScope(target);
+
+  const workdir =
+    process.env.BBH_WORKDIR ??
+    (await fs.mkdtemp(path.join(os.tmpdir(), "bbh-checklist-")));
+  console.log(`[checklist] workdir: ${workdir}`);
+
+  let state = await readState(workdir).catch(() =>
+    initialState(`checklist-${path.basename(workdir)}`, target),
+  );
+  // The standalone command enters at the author stage regardless of prior state.
+  state = { ...state, current_stage: "author" };
+  await writeState(workdir, state);
+  await runChecklistStageDriver(workdir, scope, state);
+}
+
+/**
  * `bbh sweep [target]` — run only the Tier 1 sweep over an existing engagement's
  * hunt plan (set `BBH_WORKDIR` to point at it), so the hunters + prompts can be
  * iterated on without re-running auth/recon/plan.
@@ -410,6 +508,14 @@ async function pentest(args: string[]): Promise<void> {
       () => acquireToken(tokens.url),
       reportGap,
     );
+
+    // Stages 3.5 + 3.6 — Checklist Author + Reviewer. The Author writes a
+    // checklist per class with a Tier 1 candidate; the Reviewer approves-or-halts
+    // each (one Author rewrite on rejection). Walks author → review → verify on
+    // full approval, or halts the engagement with an operator report.
+    if (state.current_stage === "author") {
+      state = await runChecklistStageDriver(workdir, scope, state);
+    }
   } finally {
     await tokens.close().catch(() => {});
   }
@@ -420,6 +526,7 @@ const COMMANDS: Record<string, (args: string[]) => Promise<void>> = {
   pentest,
   plan,
   sweep,
+  checklist,
 };
 
 async function main(argv: string[]): Promise<number> {

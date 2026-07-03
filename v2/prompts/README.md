@@ -9,7 +9,8 @@ Markdown prompts for the v2 agent roles live here, added slice by slice:
 - Tier 1 sweep hunters (Stage 3) — all 13 classes ✅ (Slice 3b: `hunters/idor.md`;
   Slice 3c: `hunters/{xss_reflected,xss_stored,sqli,ssrf,auth_bypass,
   business_logic,file_upload,api,websocket,ssti,lfi,race_condition}.md`)
-- Checklist Author (Stage 3.5) / Checklist Reviewer (Stage 3.6)
+- Checklist Author (Stage 3.5) — `checklist-author.md` ✅ (Slice 4) /
+  Checklist Reviewer (Stage 3.6) — `checklist-reviewer.md` ✅ (Slice 4)
 - Verifier (Stage 4)
 - Tier 2 deep hunters
 
@@ -33,4 +34,14 @@ with a concurrency-capped worker pool (`src/hunters/sweep.ts`,
 (`source: "tier1_reactive"` → `hypotheses.jsonl`, capped at 15/engagement), the
 ledger-derived coverage matrix (`src/hunters/coverage.ts` →
 `coverage.json`, cells classified `swept` / `deep_dived` / `GAP`), and the
-`bbh sweep` subcommand now sweeping every `(surface × class)` cell.
+`bbh sweep` subcommand now sweeping every `(surface × class)` cell. Slice 4 adds
+Stages 3.5 + 3.6 — the three-role structural guard: the Checklist Author
+(`src/checklist/author.ts`, `checklist-author.md`) writes `checklists/<class>.md`
+for each class with a Tier 1 candidate; the Checklist Reviewer
+(`src/checklist/reviewer.ts`, `checklist-reviewer.md`) answers three yes/no
+questions and writes `checklists/<class>.approval.json`; and the approve-or-halt
+router (`src/checklist/stage.ts`) gives the Author exactly one rewrite on a
+rejection before halting the engagement with an operator report at
+`halted/checklist-rejection.md`. Author and Reviewer live in separate modules
+and neither imports the other's writer, so no role can edit another's output.
+The `bbh checklist` subcommand runs the stage over an existing engagement.
