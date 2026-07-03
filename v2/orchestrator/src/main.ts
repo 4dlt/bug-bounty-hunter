@@ -42,6 +42,9 @@ import { runSweep } from "./hunters/sweep.ts";
 import { runChecklistStage } from "./checklist/stage.ts";
 import type { AuthorInput, AuthorRunner } from "./checklist/author.ts";
 import type { ReviewerInput, ReviewAnswers, ReviewerRunner } from "./checklist/reviewer.ts";
+import { runVerifyStage, type SurgicalReDispatch } from "./verify/stage.ts";
+import { spawnPocExecutor, type PocExecutor } from "./verify/refire.ts";
+import type { VerifierInput, VerifierRunner, Verdict } from "./verify/verifier.ts";
 import {
   JUICE_SHOP_URL,
   composeDown,
@@ -324,6 +327,91 @@ async function runChecklistStageDriver(
 }
 
 /**
+ * Run the Verifier (Stage 4). Delegated to the standard (Sonnet) agent driven by
+ * `v2/prompts/verifier.md`, which re-fires the PoC, applies the frozen checklist,
+ * and emits one of eight verdicts — not wired in this slice. The stub confirms
+ * every finding so the loop drains and advances `verify → report` end-to-end; a
+ * real Verifier can re-queue, drop, downgrade, or escalate.
+ */
+const verifierStub: VerifierRunner = async (input: VerifierInput): Promise<Verdict> => ({
+  finding_id: input.finding_id,
+  verdict: "confirmed",
+  reason: "stub-confirmed (see verifier.md)",
+});
+
+/**
+ * Surgical re-dispatch (Stage 5). The real path re-renders the originating Tier 1
+ * hunter's prompt with the Verifier's `reason` + `mutation_hint` prepended and
+ * re-runs `runHunter`, returning any new finding ids. Not wired in this slice:
+ * the stub logs the request and produces no new findings.
+ */
+const reDispatchStub: SurgicalReDispatch = async (ctx) => {
+  console.log(
+    `[verify] surgical re-dispatch for ${ctx.finding.id} (${ctx.finding.vuln_class}): ` +
+      `${ctx.reason}${ctx.mutation_hint ? ` — hint: ${ctx.mutation_hint}` : ""}`,
+  );
+  return [];
+};
+
+/**
+ * Stage 4 + 5 driver, reused by the standalone `verify` command and the full
+ * `pentest` pipeline: run the verify loop over every candidate finding — re-fire
+ * each PoC, apply the frozen checklist, route the verdict, surgically re-dispatch
+ * re-queues (capped at 10 iterations, escalating rather than dropping), and
+ * advance `verify → report`.
+ */
+async function runVerifyStageDriver(
+  workdir: string,
+  scope: Scope,
+  state: State,
+  execute: PocExecutor,
+): Promise<State> {
+  const outcome = await runVerifyStage(workdir, {
+    scope,
+    verifierRunner: verifierStub,
+    execute,
+    reDispatch: reDispatchStub,
+    pass: state.current_pass,
+  });
+
+  const next = transition(state, outcome.event);
+  await writeState(workdir, next);
+  console.log(
+    `[verify] ${outcome.confirmed.length} confirmed, ${outcome.dropped.length} dropped, ` +
+      `${outcome.merged.length} merged, ${outcome.downgraded.length} downgraded, ` +
+      `${outcome.escalated.length} escalated (ready-for-human), ` +
+      `${outcome.reDispatched} surgical re-dispatch(es), ` +
+      `${outcome.deferredTier2.length} deferred to Tier 2` +
+      (outcome.budgetExhausted ? ", BUDGET EXHAUSTED" : "") +
+      ` -> advanced to ${next.current_stage}`,
+  );
+  return next;
+}
+
+/**
+ * `bbh verify [target]` — run only Stages 4 + 5 over an existing engagement (set
+ * `BBH_WORKDIR` to point at it), so the Verifier prompt + re-fire path can be
+ * iterated on without re-running the earlier stages.
+ */
+async function verify(args: string[]): Promise<void> {
+  const target = positional(args) ?? JUICE_SHOP_URL;
+  const scope = await resolveScope(target);
+
+  const workdir =
+    process.env.BBH_WORKDIR ??
+    (await fs.mkdtemp(path.join(os.tmpdir(), "bbh-verify-")));
+  console.log(`[verify] workdir: ${workdir}`);
+
+  let state = await readState(workdir).catch(() =>
+    initialState(`verify-${path.basename(workdir)}`, target),
+  );
+  // The standalone command enters at the verify stage regardless of prior state.
+  state = { ...state, current_stage: "verify" };
+  await writeState(workdir, state);
+  await runVerifyStageDriver(workdir, scope, state, spawnPocExecutor);
+}
+
+/**
  * `bbh checklist [target]` — run only Stages 3.5 + 3.6 over an existing
  * engagement (set `BBH_WORKDIR` to point at it), so the Author + Reviewer
  * prompts can be iterated on without re-running the earlier stages.
@@ -516,6 +604,15 @@ async function pentest(args: string[]): Promise<void> {
     if (state.current_stage === "author") {
       state = await runChecklistStageDriver(workdir, scope, state);
     }
+
+    // Stages 4 + 5 — the verify loop with surgical re-dispatch. Re-fires each
+    // candidate's PoC against the live target, applies the frozen checklist, and
+    // routes each verdict; surgical re-queues re-dispatch the originating hunter.
+    // Walks verify → report on a clean drain. Skipped when the checklist stage
+    // halted (state left at `halted`).
+    if (state.current_stage === "verify") {
+      state = await runVerifyStageDriver(workdir, scope, state, spawnPocExecutor);
+    }
   } finally {
     await tokens.close().catch(() => {});
   }
@@ -527,6 +624,7 @@ const COMMANDS: Record<string, (args: string[]) => Promise<void>> = {
   plan,
   sweep,
   checklist,
+  verify,
 };
 
 async function main(argv: string[]): Promise<number> {

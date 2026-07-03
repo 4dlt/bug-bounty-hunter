@@ -11,7 +11,7 @@ Markdown prompts for the v2 agent roles live here, added slice by slice:
   business_logic,file_upload,api,websocket,ssti,lfi,race_condition}.md`)
 - Checklist Author (Stage 3.5) — `checklist-author.md` ✅ (Slice 4) /
   Checklist Reviewer (Stage 3.6) — `checklist-reviewer.md` ✅ (Slice 4)
-- Verifier (Stage 4)
+- Verifier (Stages 4–5) — `verifier.md` ✅ (Slice 5)
 - Tier 2 deep hunters
 
 Slice 0 shipped the scaffolding, LLM client, state machine, rate-limit
@@ -45,3 +45,22 @@ rejection before halting the engagement with an operator report at
 `halted/checklist-rejection.md`. Author and Reviewer live in separate modules
 and neither imports the other's writer, so no role can edit another's output.
 The `bbh checklist` subcommand runs the stage over an existing engagement.
+
+Slice 5 adds Stages 4 + 5 — the verify loop with surgical re-dispatch. The
+stateless Verifier (`src/verify/verifier.ts`, `verifier.md`) applies the frozen
+checklist to one finding and emits exactly one of eight verdicts (validated by
+`VerdictSchema`); it reads the frozen `checklists/<class>.md` and edits nothing.
+The re-fire path (`src/verify/refire.ts`) re-runs each finding's `poc.sh` against
+the live target and diffs the fresh response against the captured one —
+deliberately bypassing the hunter dedupe (re-firing a known PoC is the point).
+The pure routing table (`src/verify/routing.ts`) maps each verdict to its action,
+and the loop driver (`src/verify/stage.ts`) executes them: `confirmed` →
+`verdicts/pass-N.json`; `repro_failed` / `weak_evidence` → surgical re-dispatch of
+the originating Tier 1 hunter with the `reason` + `mutation_hint` prepended;
+`out_of_scope` → drop; `duplicate` → merge; `severity_mismatch` → downgrade;
+`non_deterministic` → escalate `ready-for-human`; `rate_limited` → backoff +
+re-verify. A 10-iteration cap per finding escalates rather than drops, and the
+loop exits cleanly when no re-queue verdicts remain (or the budget is exhausted).
+The `bbh verify` subcommand runs the loop over an existing engagement; the
+verify-loop seam tests (`tests/verify.test.ts`, fixtures under
+`tests/fixtures/verify/`) cover all eight verdicts and both re-queue paths.
