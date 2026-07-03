@@ -30,7 +30,14 @@ import {
   type ReconAgentContext,
   type ReconResult,
 } from "./recon.ts";
-import { runPlan, readHuntPlan, type PlanInput, type PlanProposal } from "./plan.ts";
+import {
+  runPlan,
+  readHuntPlan,
+  appendHypotheses,
+  HypothesisSchema,
+  type PlanInput,
+  type PlanProposal,
+} from "./plan.ts";
 import {
   type HunterContext,
   type HunterYield,
@@ -45,6 +52,14 @@ import type { ReviewerInput, ReviewAnswers, ReviewerRunner } from "./checklist/r
 import { runVerifyStage, type SurgicalReDispatch } from "./verify/stage.ts";
 import { spawnPocExecutor, type PocExecutor } from "./verify/refire.ts";
 import type { VerifierInput, VerifierRunner, Verdict } from "./verify/verifier.ts";
+import { runTier2Stage } from "./tier2/stage.ts";
+import {
+  runDeepHunter,
+  DeepHunterOutputSchema,
+  type DeepHunterContext,
+  type DeepHunterOutput,
+  type DeepHunterRunner,
+} from "./tier2/deep-hunter.ts";
 import {
   JUICE_SHOP_URL,
   composeDown,
@@ -354,6 +369,59 @@ const reDispatchStub: SurgicalReDispatch = async (ctx) => {
 };
 
 /**
+ * Run one Tier 2 deep-hunt iteration (Stage 6). Delegated to the spawned Sonnet
+ * agent driven by `v2/prompts/deep-hunter.md`, which reads the recipe, fires
+ * mutation-driven probes through the scoped fetch + the ledger hard-check, and
+ * returns `finding | rejected | needs_more_budget` — not wired in this slice.
+ * The stub rejects every hypothesis so the deep-hunt loop drains without firing,
+ * exactly as `hunterStub`/`verifierStub` stub the earlier stages.
+ */
+const deepHunterStub: DeepHunterRunner = async (
+  ctx: DeepHunterContext,
+): Promise<DeepHunterOutput> =>
+  DeepHunterOutputSchema.parse({
+    outcome: "rejected",
+    reason: `deep hunter not wired in Slice 6 — see deep-hunter.md (iter ${ctx.iteration})`,
+  });
+
+/**
+ * Promote-to-Tier-2 seam (Stages 4↔6). When the Verifier returns a re-queue
+ * verdict with `next_step: 'promote_to_tier2'`, spawn a focused deep hunter on
+ * the finding's hypothesis: record a `verifier_escalation` hypothesis, run the
+ * fresh-agent-per-iteration deep hunt, and return any new finding ids (which flow
+ * back through the SAME verify loop). Not wired in this slice: `deepHunterStub`
+ * finds nothing, so the promotion is recorded but produces no new candidate.
+ */
+function promoteToTier2Driver(workdir: string, scope: Scope): SurgicalReDispatch {
+  return async (ctx) => {
+    const hypothesis = HypothesisSchema.parse({
+      id: `h-esc-${ctx.finding.id}`,
+      source: "verifier_escalation",
+      class: ctx.finding.vuln_class,
+      target_endpoint: ctx.finding.endpoint,
+      hypothesis: `Promoted from ${ctx.finding.id} (${ctx.finding.title}): ${ctx.reason}`,
+      signal_evidence: ctx.mutation_hint ?? "",
+      estimated_payout_band: null,
+      status: "queued",
+    });
+    // Record the escalation in the append-only queue (highest priority source).
+    await appendHypotheses(workdir, [hypothesis]);
+    console.log(
+      `[verify] promote_to_tier2 for ${ctx.finding.id} (${ctx.finding.vuln_class}): ` +
+        `${ctx.reason}${ctx.mutation_hint ? ` — hint: ${ctx.mutation_hint}` : ""}`,
+    );
+    const deep = await runDeepHunter(workdir, {
+      runner: deepHunterStub,
+      scope,
+      hypothesis,
+      transport: stubTransport,
+      pass: 0,
+    });
+    return deep.findingIds;
+  };
+}
+
+/**
  * Stage 4 + 5 driver, reused by the standalone `verify` command and the full
  * `pentest` pipeline: run the verify loop over every candidate finding — re-fire
  * each PoC, apply the frozen checklist, route the verdict, surgically re-dispatch
@@ -371,6 +439,7 @@ async function runVerifyStageDriver(
     verifierRunner: verifierStub,
     execute,
     reDispatch: reDispatchStub,
+    promoteToTier2: promoteToTier2Driver(workdir, scope),
     pass: state.current_pass,
   });
 
@@ -381,7 +450,8 @@ async function runVerifyStageDriver(
       `${outcome.merged.length} merged, ${outcome.downgraded.length} downgraded, ` +
       `${outcome.escalated.length} escalated (ready-for-human), ` +
       `${outcome.reDispatched} surgical re-dispatch(es), ` +
-      `${outcome.deferredTier2.length} deferred to Tier 2` +
+      `${outcome.tier2Spawned} Tier 2 deep-hunt(s) ` +
+      `(${outcome.deferredTier2.length} promoted)` +
       (outcome.budgetExhausted ? ", BUDGET EXHAUSTED" : "") +
       ` -> advanced to ${next.current_stage}`,
   );
@@ -409,6 +479,63 @@ async function verify(args: string[]): Promise<void> {
   state = { ...state, current_stage: "verify" };
   await writeState(workdir, state);
   await runVerifyStageDriver(workdir, scope, state, spawnPocExecutor);
+}
+
+/**
+ * Stage 6 driver, reused by the standalone `tier2` command and the full `pentest`
+ * pipeline: deep-hunt the hypothesis queue in priority order (verifier escalations
+ * → plan a-priori → tier1 reactive), capped at 15 (overflow logged `deferred`),
+ * with a fresh-agent-per-iteration deep hunter. Findings flow back into verify.
+ */
+async function runTier2StageDriver(
+  workdir: string,
+  scope: Scope,
+  state: State,
+  takeToken: () => Promise<boolean>,
+): Promise<void> {
+  const outcome = await runTier2Stage(workdir, {
+    scope,
+    runner: deepHunterStub,
+    transport: stubTransport,
+    takeToken,
+    pass: state.current_pass,
+  });
+  const findings = outcome.results.filter((r) => r.result === "finding").length;
+  const rejected = outcome.results.filter((r) => r.result === "rejected").length;
+  const escalated = outcome.results.filter((r) => r.result === "escalated").length;
+  console.log(
+    `[tier2] ${outcome.processed} hypothesis(es) deep-hunted, ` +
+      `${findings} finding(s), ${rejected} rejected, ${escalated} escalated, ` +
+      `${outcome.deferred.length} deferred (cap)` +
+      (outcome.budgetExhausted ? ", BUDGET EXHAUSTED" : ""),
+  );
+}
+
+/**
+ * `bbh tier2 [target]` — run only the Stage 6 deep-hunt pass over an existing
+ * engagement's hypothesis queue (set `BBH_WORKDIR` to point at it), so the deep
+ * hunter + prompt can be iterated on without re-running the earlier stages.
+ */
+async function tier2(args: string[]): Promise<void> {
+  const target = positional(args) ?? JUICE_SHOP_URL;
+  const scope = await resolveScope(target);
+
+  const workdir =
+    process.env.BBH_WORKDIR ??
+    (await fs.mkdtemp(path.join(os.tmpdir(), "bbh-tier2-")));
+  console.log(`[tier2] workdir: ${workdir}`);
+
+  const state = await readState(workdir).catch(() =>
+    initialState(`tier2-${path.basename(workdir)}`, target),
+  );
+
+  const tokens = await startTokenServer(new TokenBucket(5));
+  console.log(`[tier2] token endpoint: ${tokens.url}/token`);
+  try {
+    await runTier2StageDriver(workdir, scope, state, () => acquireToken(tokens.url));
+  } finally {
+    await tokens.close().catch(() => {});
+  }
 }
 
 /**
@@ -605,11 +732,21 @@ async function pentest(args: string[]): Promise<void> {
       state = await runChecklistStageDriver(workdir, scope, state);
     }
 
-    // Stages 4 + 5 — the verify loop with surgical re-dispatch. Re-fires each
-    // candidate's PoC against the live target, applies the frozen checklist, and
-    // routes each verdict; surgical re-queues re-dispatch the originating hunter.
-    // Walks verify → report on a clean drain. Skipped when the checklist stage
-    // halted (state left at `halted`).
+    // Stage 6 — Tier 2 deep-hunt pass. Drains the hypothesis queue (a-priori +
+    // Tier 1 reactive) in priority order, capped at 15, deep-hunting each with a
+    // fresh-agent-per-iteration hunter; new findings land in findings/<id>/ and
+    // are picked up by the verify loop below. Verifier escalations are added
+    // inline during verify via the promote_to_tier2 seam.
+    if (state.current_stage === "verify") {
+      await runTier2StageDriver(workdir, scope, state, () => acquireToken(tokens.url));
+    }
+
+    // Stages 4 + 5 — the verify loop with surgical re-dispatch + Tier 2 promotion.
+    // Re-fires each candidate's PoC against the live target, applies the frozen
+    // checklist, and routes each verdict; surgical re-queues re-dispatch the
+    // originating hunter, promote_to_tier2 spawns a deep hunter whose findings
+    // flow back through this loop. Walks verify → report on a clean drain.
+    // Skipped when the checklist stage halted (state left at `halted`).
     if (state.current_stage === "verify") {
       state = await runVerifyStageDriver(workdir, scope, state, spawnPocExecutor);
     }
@@ -625,6 +762,7 @@ const COMMANDS: Record<string, (args: string[]) => Promise<void>> = {
   sweep,
   checklist,
   verify,
+  tier2,
 };
 
 async function main(argv: string[]): Promise<number> {

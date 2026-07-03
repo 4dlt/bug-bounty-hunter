@@ -12,7 +12,7 @@ Markdown prompts for the v2 agent roles live here, added slice by slice:
 - Checklist Author (Stage 3.5) — `checklist-author.md` ✅ (Slice 4) /
   Checklist Reviewer (Stage 3.6) — `checklist-reviewer.md` ✅ (Slice 4)
 - Verifier (Stages 4–5) — `verifier.md` ✅ (Slice 5)
-- Tier 2 deep hunters
+- Tier 2 deep hunters (Stage 6) — `deep-hunter.md` ✅ (Slice 6)
 
 Slice 0 shipped the scaffolding, LLM client, state machine, rate-limit
 governor, and Juice Shop test target. Slice 1 adds Stage 0: the scope.yaml
@@ -64,3 +64,26 @@ loop exits cleanly when no re-queue verdicts remain (or the budget is exhausted)
 The `bbh verify` subcommand runs the loop over an existing engagement; the
 verify-loop seam tests (`tests/verify.test.ts`, fixtures under
 `tests/fixtures/verify/`) cover all eight verdicts and both re-queue paths.
+
+Slice 6 adds Stage 6 — Tier 2 deep hunters with mutation-driven iteration. The
+hypothesis queue (`src/tier2/queue.ts`) reads `hypotheses.jsonl` and consumes it
+in strict priority order — verifier escalations → plan a-priori → Tier 1 reactive
+— capped at 15 per engagement, the overflow logged as `deferred` to
+`tier2/deferred.jsonl`. Each surviving hypothesis is deep-hunted by a fresh agent
+per iteration (`src/tier2/deep-hunter.ts`): iteration N+1 reads N's output from
+`tier2/<hypothesis_id>/iter-N.json`, accumulates the prior `mutation_hint`s, and
+re-spawns with a six-section structured recipe (`src/tier2/recipe.ts`:
+HYPOTHESIS / CONTEXT / ALREADY_TRIED / MUTATION_HINTS / BUDGET / OUTPUT_SCHEMA).
+Every probe fires through the same dedupe+token+ledger firer as Tier 1 — that IS
+the Tier 2 hard-check: a probe whose `(endpoint, payload_sig, session)` 3-tuple is
+already in `ledger.jsonl` is refused before it hits the network. A deep hunt ends
+on `finding` (written to `findings/<id>/`, flowing back into the SAME verify loop),
+`rejected`, or the 10-iteration cap — which escalates the hypothesis to
+`ready-for-human` rather than dropping it. The verify loop's `promote_to_tier2`
+verdict spawns a deep hunter inline via the injected `promoteToTier2` seam
+(`src/tier2/stage.ts` + the seam in `src/verify/stage.ts`), so its findings
+re-enter verify and can themselves be re-queued. The `bbh tier2` subcommand drains
+the queue over an existing engagement; the seam tests (`tests/tier2.test.ts`)
+cover priority ordering, the 15-cap deferral, the ledger hard-check, fresh-agent
+iteration inheritance, the 10-iteration escalation, and the promote_to_tier2
+routing back through verify.

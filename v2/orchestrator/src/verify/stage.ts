@@ -7,9 +7,11 @@
 //   - repro_failed /
 //     weak_evidence     → re-queue. `surgical` re-dispatches the ORIGINATING
 //                         Tier 1 hunter with the `reason` + `mutation_hint`
-//                         prepended, then re-verifies. `promote_to_tier2` is a
-//                         heavier escalation deferred to Slice 6 (recorded, not
-//                         looped).
+//                         prepended, then re-verifies. `promote_to_tier2` spawns
+//                         a Tier 2 deep hunter (Slice 6) via the injected
+//                         `promoteToTier2` seam; its new findings flow back
+//                         through THIS loop. With no seam wired it is recorded
+//                         (deferred), not looped.
 //   - out_of_scope      → dropped + logged
 //   - duplicate         → merged into the existing confirmed finding
 //   - severity_mismatch → kept, severity downgraded one band
@@ -122,6 +124,14 @@ export interface RunVerifyStageOptions {
   execute: PocExecutor;
   /** Re-run the originating hunter for a surgical re-queue. */
   reDispatch: SurgicalReDispatch;
+  /**
+   * Spawn a Tier 2 deep hunter for a `promote_to_tier2` re-queue (Slice 6).
+   * Same shape as `reDispatch`: returns the ids of any NEW findings the deep
+   * hunt produced, which are enqueued back through THIS verify loop. When
+   * omitted, a `promote_to_tier2` verdict is only recorded (deferred), not
+   * looped — the pre-Slice-6 behaviour.
+   */
+  promoteToTier2?: SurgicalReDispatch;
   /** Cap on verify iterations per finding (default MAX_ITERATIONS). */
   maxIterations?: number;
   /** Engagement-budget predicate; when it returns true the loop stops. */
@@ -141,10 +151,12 @@ export interface VerifyStageOutcome {
   downgraded: string[];
   /** ready-for-human (non_deterministic, or a finding that hit the cap). */
   escalated: string[];
-  /** promote_to_tier2 re-queues, deferred to Slice 6. */
+  /** promote_to_tier2 re-queues: the findings promoted to a Tier 2 deep hunt. */
   deferredTier2: string[];
   /** Number of surgical hunter re-dispatches performed. */
   reDispatched: number;
+  /** Number of Tier 2 deep-hunt spawns performed (promote_to_tier2). */
+  tier2Spawned: number;
   /** Verify iterations spent per finding id. */
   iterations: Record<string, number>;
   /** True when the loop stopped because the engagement budget was exhausted. */
@@ -186,6 +198,7 @@ export async function runVerifyStage(
     escalated: [],
     deferredTier2: [],
     reDispatched: 0,
+    tier2Spawned: 0,
     iterations: {},
     budgetExhausted: false,
   };
@@ -248,8 +261,28 @@ export async function runVerifyStage(
         break;
       case "requeue":
         if (route.next_step === "promote_to_tier2") {
-          // Tier 2 promotion is Slice 6 — record and stop looping this finding.
+          // Record every promoted finding (identifies what went to Tier 2).
           outcome.deferredTier2.push(id);
+          // With no Tier 2 seam wired, stop looping this finding (pre-Slice-6
+          // behaviour: recorded, not deep-hunted).
+          if (!opts.promoteToTier2) break;
+          // At the cap, escalate rather than spawn yet another deep hunt.
+          if (n >= cap) {
+            await escalate(id, verdict.reason);
+            break;
+          }
+          {
+            // Spawn a Tier 2 deep hunter on this finding's hypothesis; its NEW
+            // findings flow back through THIS loop and can themselves re-queue.
+            const meta = await readFindingMeta(workdir, id);
+            const newIds = await opts.promoteToTier2({
+              finding: meta,
+              reason: verdict.reason,
+              mutation_hint: verdict.mutation_hint,
+            });
+            outcome.tier2Spawned += 1;
+            queue.push(...newIds);
+          }
           break;
         }
         // surgical: re-dispatch the originating hunter, then re-verify. On cap
