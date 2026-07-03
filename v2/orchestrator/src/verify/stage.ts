@@ -192,6 +192,14 @@ export async function runVerifyStage(
   const confirmedVerdicts: Verdict[] = [];
   const iterations = new Map<string, number>();
 
+  // Flag a finding ready-for-human and record it in the outcome. The two must
+  // stay in sync, so every escalation (non_deterministic, or a re-queue/backoff
+  // that hits the cap) routes through here.
+  const escalate = async (findingId: string, reason: string): Promise<void> => {
+    await escalateToHuman(workdir, findingId, reason);
+    outcome.escalated.push(findingId);
+  };
+
   const queue = await listFindingIds(workdir);
   while (queue.length > 0) {
     if (budgetExhausted()) {
@@ -226,15 +234,13 @@ export async function runVerifyStage(
         break;
       case "escalate":
         // non_deterministic — flagged ready-for-human, evidence preserved.
-        await escalateToHuman(workdir, id, verdict.reason);
-        outcome.escalated.push(id);
+        await escalate(id, verdict.reason);
         break;
       case "backoff":
         // rate_limited — verify-only re-verify, no hunter re-dispatch. The cap
         // guards against a permanently-throttled finding looping forever.
         if (n >= cap) {
-          await escalateToHuman(workdir, id, verdict.reason);
-          outcome.escalated.push(id);
+          await escalate(id, verdict.reason);
         } else {
           await backoff();
           queue.push(id);
@@ -249,8 +255,7 @@ export async function runVerifyStage(
         // surgical: re-dispatch the originating hunter, then re-verify. On cap
         // exhaustion the finding is ESCALATED (ready-for-human), never dropped.
         if (n >= cap) {
-          await escalateToHuman(workdir, id, verdict.reason);
-          outcome.escalated.push(id);
+          await escalate(id, verdict.reason);
           break;
         }
         {
