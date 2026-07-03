@@ -333,7 +333,7 @@ async function readReconArtifacts(workdir: string): Promise<{
   tech: Record<string, unknown>;
 }> {
   const dir = reconDir(workdir);
-  const readJson = async <T>(file: string, fallback: T): Promise<unknown> => {
+  const readJson = async (file: string, fallback: unknown): Promise<unknown> => {
     try {
       return JSON.parse(await fs.readFile(path.join(dir, file), "utf8"));
     } catch (err) {
