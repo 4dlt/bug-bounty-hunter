@@ -6,7 +6,7 @@ Markdown prompts for the v2 agent roles live here, added slice by slice:
 - Recon R1–R4 (Stage 1) — `recon-r1-assets.md`, `recon-r2-content.md`,
   `recon-r3-fingerprint.md`, `recon-r4-js-analysis.md` ✅ (Slice 2)
 - Plan (Stage 2) — `plan.md` ✅ (Slice 3a)
-- Tier 1 sweep hunters (Stage 3)
+- Tier 1 sweep hunters (Stage 3) — `hunters/idor.md` ✅ (Slice 3b; IDOR hunter)
 - Checklist Author (Stage 3.5) / Checklist Reviewer (Stage 3.6)
 - Verifier (Stage 4)
 - Tier 2 deep hunters
@@ -19,4 +19,9 @@ Stage 1 recon: the parallel R1–R4 orchestration + merge (`src/recon.ts`), the
 governor client (`acquireToken` in `src/ratelimit.ts`), and the four recon agent
 prompts above. Slice 3a adds Stage 2 Plan: the hunt-plan / a-priori-hypothesis
 schemas + surface-compatibility filter + seeding (`src/plan.ts`), the `bbh plan`
-subcommand, and the `plan.md` prompt.
+subcommand, and the `plan.md` prompt. Slice 3b adds Stage 3's Tier 1 hunter
+framework: the append-only `ledger.jsonl` + the `(endpoint, payload_sig,
+session)` dedupe primitive (`src/hunters/ledger.ts`), the hunter framework —
+prompt rendering, the dedupe+token+ledger probe firer, and `findings/<id>/`
+emission (`src/hunters/framework.ts`), the one concrete IDOR hunter
+(`hunters/idor.md`), and the `bbh sweep --class idor` subcommand.

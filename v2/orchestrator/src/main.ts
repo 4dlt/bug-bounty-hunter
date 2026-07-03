@@ -30,7 +30,14 @@ import {
   type ReconAgentContext,
   type ReconResult,
 } from "./recon.ts";
-import { runPlan, type PlanInput, type PlanProposal } from "./plan.ts";
+import { runPlan, readHuntPlan, type PlanInput, type PlanProposal } from "./plan.ts";
+import {
+  runHunter,
+  type HunterContext,
+  type HunterFinding,
+  type ProbeTransport,
+  type Payload,
+} from "./hunters/framework.ts";
 import {
   JUICE_SHOP_URL,
   composeDown,
@@ -97,6 +104,24 @@ async function resolveScope(target: string): Promise<Scope> {
   }
 }
 
+/** Value of a `--flag value` pair in argv, or undefined if absent. */
+function flagValue(args: string[], flag: string): string | undefined {
+  const i = args.indexOf(flag);
+  return i >= 0 ? args[i + 1] : undefined;
+}
+
+/** First non-flag positional argument (skips `--flag value` pairs). */
+function positional(args: string[]): string | undefined {
+  for (let i = 0; i < args.length; i += 1) {
+    if (args[i]!.startsWith("--")) {
+      i += 1; // skip the flag's value
+      continue;
+    }
+    return args[i];
+  }
+  return undefined;
+}
+
 /**
  * Drive the dev-browser login. Delegated to the auth-acquire agent
  * (v2/prompts/auth-acquire.md) which needs a headed dev-browser — not wired in
@@ -141,6 +166,117 @@ async function planAgentStub(_input: PlanInput): Promise<PlanProposal> {
 }
 
 /**
+ * The IDOR payload corpus this slice sweeps with. Values are id-mutation recipes
+ * the hunter applies to the sequential/opaque object ids it finds; the
+ * orchestrator derives each probe's `payload_sig` from the value it fires. A
+ * later slice will draw from the v1 `Payloads/*.yaml` corpus.
+ */
+const IDOR_PAYLOADS: Payload[] = [
+  { id: "idor-decrement", value: "{id}-1", notes: "decrement a sequential id to reach a lower object" },
+  { id: "idor-increment", value: "{id}+1", notes: "increment a sequential id to reach a higher object" },
+  { id: "idor-known-victim", value: "victim-object-id", notes: "substitute a known other-user/tenant object id" },
+  { id: "idor-uuid-swap", value: "uuid-from-another-flow", notes: "swap in a UUID captured from a different account" },
+];
+
+/**
+ * Run one Tier 1 hunter (Stage 3). Delegated to the spawned Sonnet agent driven
+ * by `v2/prompts/hunters/<class>.md`, which fires probes through the scoped
+ * fetch + the token governor and checks the ledger before each novel probe — not
+ * wired in this slice. Returns an empty result so the sweep advances end-to-end,
+ * exactly as `reconAgentStub`/`planAgentStub` stub the earlier stages.
+ */
+async function hunterStub(_ctx: HunterContext): Promise<{ findings: HunterFinding[] }> {
+  return { findings: [] };
+}
+
+/**
+ * Placeholder network transport for the un-wired hunter. The real transport
+ * routes each probe through the scope-enforced fetch against the live target;
+ * here it never runs (the stub runner fires nothing).
+ */
+const stubTransport: ProbeTransport = async () => ({
+  status: "skipped",
+  trigger_match: false,
+});
+
+/**
+ * Stage 3 (IDOR only, this slice) driver, reused by the standalone `sweep`
+ * command and the full `pentest` pipeline: run the IDOR hunter over every `idor`
+ * cell of the hunt plan (firing probes through the dedupe+token+ledger path,
+ * writing `findings/<id>/`), then transition `sweep → author`.
+ */
+async function runSweepStage(
+  workdir: string,
+  scope: Scope,
+  state: State,
+  takeToken: () => Promise<boolean>,
+): Promise<State> {
+  const cells = await readHuntPlan(workdir).catch(() => []);
+  const idorCells = cells.filter((c) => c.vuln_class === "idor");
+
+  let probes = 0;
+  let findings = 0;
+  for (const cell of idorCells) {
+    const outcome = await runHunter(workdir, {
+      runner: hunterStub,
+      scope,
+      surface: cell.surface,
+      vuln_class: "idor",
+      endpoints: cell.relevant_endpoints,
+      payloads: IDOR_PAYLOADS,
+      transport: stubTransport,
+      pass: state.current_pass,
+      takeToken,
+    });
+    probes += outcome.probesFired;
+    findings += outcome.findings.length;
+  }
+
+  const next = transition(state, { type: "advance" });
+  await writeState(workdir, next);
+  console.log(
+    `[sweep] idor: ${idorCells.length} cell(s), ${probes} probe(s) logged, ` +
+      `${findings} finding(s) -> advanced to ${next.current_stage}`,
+  );
+  return next;
+}
+
+/**
+ * `bbh sweep --class idor [target]` — run only the Tier 1 IDOR hunter over an
+ * existing engagement's hunt plan (set `BBH_WORKDIR` to point at it), so the
+ * hunter + prompt can be iterated on without re-running auth/recon/plan.
+ */
+async function sweep(args: string[]): Promise<void> {
+  const cls = flagValue(args, "--class") ?? "idor";
+  if (cls !== "idor") {
+    console.error(`Only --class idor is implemented in this slice (got "${cls}")`);
+    throw new Error("unsupported hunter class");
+  }
+  const target = positional(args) ?? JUICE_SHOP_URL;
+  const scope = await resolveScope(target);
+
+  const workdir =
+    process.env.BBH_WORKDIR ??
+    (await fs.mkdtemp(path.join(os.tmpdir(), "bbh-sweep-")));
+  console.log(`[sweep] workdir: ${workdir}`);
+
+  let state = await readState(workdir).catch(() =>
+    initialState(`sweep-${path.basename(workdir)}`, target),
+  );
+  // The standalone command enters at the sweep stage regardless of prior state.
+  state = { ...state, current_stage: "sweep" };
+  await writeState(workdir, state);
+
+  const tokens = await startTokenServer(new TokenBucket(5));
+  console.log(`[sweep] token endpoint: ${tokens.url}/token`);
+  try {
+    await runSweepStage(workdir, scope, state, () => acquireToken(tokens.url));
+  } finally {
+    await tokens.close().catch(() => {});
+  }
+}
+
+/**
  * Stage 2 driver, reused by the standalone `plan` command and the full
  * `pentest` pipeline: run the Plan agent over the recon map and transition
  * `plan → sweep`.
@@ -168,7 +304,8 @@ async function runPlanStage(
  * (set `BBH_WORKDIR` to point at an existing engagement; otherwise a fresh temp
  * dir is used and the plan comes out empty but valid).
  */
-async function plan(target?: string): Promise<void> {
+async function plan(args: string[]): Promise<void> {
+  const target = positional(args);
   if (!target) {
     console.error("Usage: bbh plan <target-url>");
     throw new Error("missing target");
@@ -194,7 +331,8 @@ async function plan(target?: string): Promise<void> {
  * runs Stage 1 recon (R1-R4 in parallel) then Stage 2 Plan (hunt plan +
  * a-priori hypotheses), advancing `auth → recon → plan → sweep`.
  */
-async function pentest(target?: string): Promise<void> {
+async function pentest(args: string[]): Promise<void> {
+  const target = positional(args);
   if (!target) {
     console.error("Usage: bbh pentest <target-url>");
     throw new Error("missing target");
@@ -252,15 +390,21 @@ async function pentest(target?: string): Promise<void> {
     // Stage 2 — Plan. Reads the recon map and emits hunt-plan.json +
     // a-priori hypotheses, advancing plan -> sweep.
     state = await runPlanStage(workdir, scope, state);
+
+    // Stage 3 — Tier 1 sweep (IDOR only, this slice). Runs the IDOR hunter over
+    // each idor cell, appending probes to ledger.jsonl + writing findings/<id>/,
+    // advancing sweep -> author.
+    state = await runSweepStage(workdir, scope, state, () => acquireToken(tokens.url));
   } finally {
     await tokens.close().catch(() => {});
   }
 }
 
-const COMMANDS: Record<string, (arg?: string) => Promise<void>> = {
+const COMMANDS: Record<string, (args: string[]) => Promise<void>> = {
   hello,
   pentest,
   plan,
+  sweep,
 };
 
 async function main(argv: string[]): Promise<number> {
@@ -270,7 +414,7 @@ async function main(argv: string[]): Promise<number> {
     console.error(`Usage: bbh <command> [args]\nCommands: ${known}`);
     return command ? 1 : 0;
   }
-  await COMMANDS[command]!(argv[1]);
+  await COMMANDS[command]!(argv.slice(1));
   return 0;
 }
 
