@@ -13,6 +13,8 @@ Markdown prompts for the v2 agent roles live here, added slice by slice:
   Checklist Reviewer (Stage 3.6) — `checklist-reviewer.md` ✅ (Slice 4)
 - Verifier (Stages 4–5) — `verifier.md` ✅ (Slice 5)
 - Tier 2 deep hunters (Stage 6) — `deep-hunter.md` ✅ (Slice 6)
+- Report + Resume + Budget halt (Stage 6 report, resume, runaway protection) —
+  no agent prompt (deterministic) ✅ (Slice 7)
 
 Slice 0 shipped the scaffolding, LLM client, state machine, rate-limit
 governor, and Juice Shop test target. Slice 1 adds Stage 0: the scope.yaml
@@ -87,3 +89,30 @@ the queue over an existing engagement; the seam tests (`tests/tier2.test.ts`)
 cover priority ordering, the 15-cap deferral, the ledger hard-check, fresh-agent
 iteration inheritance, the 10-iteration escalation, and the promote_to_tier2
 routing back through verify.
+
+Slice 7 closes the pipeline — Report (Stage 6), Resume, and Budget halt — and
+adds the third and final testing seam (the stage gate). The Report generator
+(`src/report/report.ts`) reads every `verdicts/pass-*.json` for `confirmed`
+verdicts (deduped by finding-id, highest pass wins), pairs each with its
+`findings/<id>/finding.json`, and renders `report.md`: title, P1–P4 impact
+severity (NOT bounty), affected endpoint, `poc.sh`, evidence reference, and a
+per-class suggested fix. Findings the verify loop escalated to `ready-for-human`
+get their own section. There is NO bounty estimation anywhere — a source-grep
+test proves the module never emits a `bounty_estimate` field. The three
+runaway-protection budgets (`src/budget.ts`) — `max_probes` (ledger lines),
+`max_llm_calls` (in-process counter), `max_minutes` (wall-clock) — halt the
+engagement cleanly the moment any one is met: a partial `report.md` is written
+from the findings confirmed to date and `state.json.status` flips to
+`budget_exhausted`. Resume (`src/resume.ts`) reads `state.json`, snapshots the
+on-disk artifacts, and validates that every stage strictly before the claimed
+in-flight stage left its primary artifact — a missing one surfaces the
+inconsistency rather than silently resuming from a corrupt point; re-running the
+in-flight stage is safe because the ledger dedupe refuses repeat probes. The
+`bbh report`, `bbh resume <dir>`, and `bbh status <dir>` subcommands surface all
+three, and the full `pentest` pipeline now creates a `BudgetTracker`, feeds its
+predicate into the verify loop, halts on exhaustion, and otherwise walks
+`verify → report → done`. The stage-gate seam tests (`tests/state-gate.test.ts`,
+fixtures under `tests/fixtures/state-gate/`) cover report contents (confirmed
+only + a separate ready-for-human section, no bounty), resume from each of the 8
+stages, the checklist-rejection operator artifact, a clean budget halt with a
+partial report, and the in-flight-stage re-run NOT double-firing probes.

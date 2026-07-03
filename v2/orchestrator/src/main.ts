@@ -66,6 +66,13 @@ import {
   composeUp,
   waitForJuiceShop,
 } from "./test-target.ts";
+import { writeReport } from "./report/report.ts";
+import { BudgetTracker, haltForBudget } from "./budget.ts";
+import {
+  planResume,
+  collectStatus,
+  formatStatus,
+} from "./resume.ts";
 
 async function hello(): Promise<void> {
   const workdir = await fs.mkdtemp(path.join(os.tmpdir(), "bbh-hello-"));
@@ -433,6 +440,7 @@ async function runVerifyStageDriver(
   scope: Scope,
   state: State,
   execute: PocExecutor,
+  budgetTracker?: BudgetTracker,
 ): Promise<State> {
   const outcome = await runVerifyStage(workdir, {
     scope,
@@ -441,10 +449,9 @@ async function runVerifyStageDriver(
     reDispatch: reDispatchStub,
     promoteToTier2: promoteToTier2Driver(workdir, scope),
     pass: state.current_pass,
+    budgetExhausted: budgetTracker?.predicate(),
   });
 
-  const next = transition(state, outcome.event);
-  await writeState(workdir, next);
   console.log(
     `[verify] ${outcome.confirmed.length} confirmed, ${outcome.dropped.length} dropped, ` +
       `${outcome.merged.length} merged, ${outcome.downgraded.length} downgraded, ` +
@@ -452,10 +459,64 @@ async function runVerifyStageDriver(
       `${outcome.reDispatched} surgical re-dispatch(es), ` +
       `${outcome.tier2Spawned} Tier 2 deep-hunt(s) ` +
       `(${outcome.deferredTier2.length} promoted)` +
-      (outcome.budgetExhausted ? ", BUDGET EXHAUSTED" : "") +
-      ` -> advanced to ${next.current_stage}`,
+      (outcome.budgetExhausted ? ", BUDGET EXHAUSTED" : ""),
+  );
+
+  // Budget exhaustion is a runaway-protection halt, NOT a normal advance: write
+  // a partial report from the findings confirmed to date, mark the engagement
+  // `budget_exhausted`, and stop — do not walk verify → report.
+  if (budgetTracker) {
+    const exceeded = await budgetTracker.exhausted();
+    if (exceeded.length > 0) {
+      const halt = await haltForBudget(workdir, state, exceeded);
+      console.error(
+        `[verify] budget exhausted (${exceeded.join(", ")}); wrote partial report, ` +
+          `status=${halt.state.status}`,
+      );
+      return halt.state;
+    }
+  }
+
+  const next = transition(state, outcome.event);
+  await writeState(workdir, next);
+  console.log(`[verify] -> advanced to ${next.current_stage}`);
+  return next;
+}
+
+/**
+ * Stage 6 (Report) driver: render `report.md` from the confirmed verdicts +
+ * ready-for-human escalations on disk and advance `report → done`. Idempotent —
+ * re-running it just re-renders the same report.
+ */
+async function runReportStage(
+  workdir: string,
+  state: State,
+): Promise<State> {
+  const markdown = await writeReport(workdir, state);
+  const confirmed = (markdown.match(/^### \d+\. /gm) ?? []).length;
+  const next = transition(state, { type: "advance" });
+  await writeState(workdir, next);
+  console.log(
+    `[report] wrote report.md (${confirmed} confirmed section(s)) -> ${next.current_stage}`,
   );
   return next;
+}
+
+/**
+ * `bbh report [target]` — regenerate `report.md` for an existing engagement (set
+ * `BBH_WORKDIR`), so the report format can be iterated on without re-running the
+ * pipeline. Reports whatever is confirmed on disk; does not advance state.
+ */
+async function report(args: string[]): Promise<void> {
+  const workdir = process.env.BBH_WORKDIR;
+  if (!workdir) {
+    console.error("Usage: BBH_WORKDIR=<engagement-dir> bbh report");
+    throw new Error("missing BBH_WORKDIR");
+  }
+  const state = await readState(workdir);
+  const markdown = await writeReport(workdir, state);
+  console.log(`[report] wrote ${path.join(workdir, "report.md")}`);
+  console.log(markdown);
 }
 
 /**
@@ -693,6 +754,9 @@ async function pentest(args: string[]): Promise<void> {
   // coverage_gap and the survivors still merge before advancing recon -> plan.
   const tokens = await startTokenServer(new TokenBucket(5));
   console.log(`[pentest] token endpoint: ${tokens.url}/token`);
+  // Engagement budget — the three runaway-protection thresholds. Probes are read
+  // from the ledger, LLM calls counted in-process, wall-clock from construction.
+  const budgetTracker = new BudgetTracker({ workdir, budget: scope.budget });
   try {
     const recon = await runRecon(workdir, {
       scope,
@@ -748,11 +812,82 @@ async function pentest(args: string[]): Promise<void> {
     // flow back through this loop. Walks verify → report on a clean drain.
     // Skipped when the checklist stage halted (state left at `halted`).
     if (state.current_stage === "verify") {
-      state = await runVerifyStageDriver(workdir, scope, state, spawnPocExecutor);
+      await budgetTracker.refresh();
+      state = await runVerifyStageDriver(
+        workdir,
+        scope,
+        state,
+        spawnPocExecutor,
+        budgetTracker,
+      );
     }
+
+    // Stage 6 — Report. Renders report.md from the confirmed verdicts (+ any
+    // ready-for-human escalations) and advances report → done. Skipped when a
+    // budget halt or checklist rejection already left the engagement terminal.
+    if (state.current_stage === "report") {
+      state = await runReportStage(workdir, state);
+    }
+    console.log(`[pentest] finished: stage=${state.current_stage}, status=${state.status}`);
   } finally {
     await tokens.close().catch(() => {});
   }
+}
+
+/**
+ * `bbh resume <engagement-dir>` — read `state.json`, validate that the artifacts
+ * on disk match the claimed stage, and report the resume plan. Re-running the
+ * in-flight stage is safe (the ledger dedupe refuses repeat probes); an operator
+ * can then re-invoke the relevant stage command. A missing prior-stage artifact
+ * is surfaced as an inconsistency rather than silently resumed from.
+ */
+async function resume(args: string[]): Promise<void> {
+  const workdir = positional(args) ?? process.env.BBH_WORKDIR;
+  if (!workdir) {
+    console.error("Usage: bbh resume <engagement-dir>");
+    throw new Error("missing engagement dir");
+  }
+  const state = await readState(workdir);
+  const plan = await planResume(workdir, state);
+  console.log(`[resume] engagement ${state.engagement_id} (${state.target})`);
+  console.log(`[resume] status: ${state.status}`);
+
+  if (plan.terminal) {
+    console.log(`[resume] engagement is terminal (${plan.resumeStage}); nothing to resume.`);
+    return;
+  }
+  if (!plan.ok) {
+    console.error(
+      `[resume] INCONSISTENT STATE — prior-stage artifacts missing before "${plan.resumeStage}":`,
+    );
+    for (const m of plan.missing) {
+      console.error(`  - ${m.stage}: expected ${m.artifact}`);
+    }
+    console.error(
+      "[resume] refusing to auto-resume; inspect the engagement or force the stage manually.",
+    );
+    return;
+  }
+  console.log(
+    `[resume] artifacts consistent; resume from "${plan.resumeStage}" ` +
+      `(re-running it is safe — the ledger dedupe refuses repeat probes).`,
+  );
+}
+
+/**
+ * `bbh status <engagement-dir>` — show the current stage, pass, findings count,
+ * hypothesis queue depth, and probe budget usage for an engagement.
+ */
+async function status(args: string[]): Promise<void> {
+  const workdir = positional(args) ?? process.env.BBH_WORKDIR;
+  if (!workdir) {
+    console.error("Usage: bbh status <engagement-dir>");
+    throw new Error("missing engagement dir");
+  }
+  const state = await readState(workdir);
+  const scope = await resolveScope(state.target);
+  const s = await collectStatus(workdir, state, scope.budget);
+  console.log(formatStatus(s));
 }
 
 const COMMANDS: Record<string, (args: string[]) => Promise<void>> = {
@@ -763,6 +898,9 @@ const COMMANDS: Record<string, (args: string[]) => Promise<void>> = {
   checklist,
   verify,
   tier2,
+  report,
+  resume,
+  status,
 };
 
 async function main(argv: string[]): Promise<number> {
