@@ -50,6 +50,9 @@ export const ScopeSchema = z.object({
   out_of_scope: z.array(z.string()).default([]),
   auth: AuthSchema,
   min_payout_band: z.string().default("P3"),
+  // Max Tier 1 hunters in flight during the parallel sweep (Stage 3). Tunable
+  // per engagement; the default follows the PRD's 5-hunters-in-flight cap.
+  sweep_concurrency: z.number().int().positive().default(5),
   budget: BudgetSchema.prefault({}),
 });
 export type Scope = z.infer<typeof ScopeSchema>;

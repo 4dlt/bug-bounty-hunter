@@ -79,9 +79,11 @@ switch session to explore new ground.
 
 ## Output
 
-Emit exactly one JSON object with a `findings` array — the candidate bugs you
-confirmed. (The probes themselves are recorded in the ledger by the orchestrator
-as you fire them; you do not re-list them here.)
+Emit exactly one JSON object with two arrays: `findings` (the candidate bugs you
+confirmed, each with a **mandatory** runnable `poc`) and `hypotheses` (interesting
+signals worth a Tier 2 deep dive even when they are not yet a finding). The probes
+themselves are recorded in the ledger by the orchestrator as you fire them; you do
+not re-list them here.
 
 ```json
 {
@@ -95,6 +97,11 @@ as you fire them; you do not re-list them here.)
       "response": { "id": 2, "email": "victim@example.com" },
       "evidence": { "diff.txt": "email + address present for an account that is not ours" },
       "notes": "sequential ids, no ownership check on the read path" }
+  ],
+  "hypotheses": [
+    { "target_endpoint": "/api/Orders/{id}",
+      "hypothesis": "order ids look like a global auto-increment; a deeper sweep may reach admin orders",
+      "signal_evidence": "own order id is 1042; ids are sequential and not scoped to the account" }
   ]
 }
 ```
@@ -112,6 +119,15 @@ as you fire them; you do not re-list them here.)
 - `evidence` — a `{ "filename": "contents" }` map of supporting artifacts
   (diffs, decoded tokens); each is written verbatim under `findings/<id>/evidence/`.
 - `notes` — anything the Verifier or a Tier 2 deep-hunt should know.
+
+### `hypotheses` — reactive signals (Tier 2 leads)
+
+Emit one per interesting-but-unconfirmed signal (sequential ids, a role field, a
+predictable object name) rather than forcing a weak finding. Fields:
+`target_endpoint`, `hypothesis` (the specific claim to confirm or reject), and
+`signal_evidence` (what you saw). The orchestrator stamps `source:
+"tier1_reactive"`, an id, and `status: "queued"`, then appends it to
+`hypotheses.jsonl` for the Tier 2 deep-hunt queue.
 
 The orchestrator assigns each finding an id and writes it to `findings/<id>/`
 with `poc.sh`, `response.json`, and your evidence files. You do not pick ids or

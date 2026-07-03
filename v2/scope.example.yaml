@@ -27,6 +27,9 @@ auth:
 # Minimum severity band a hypothesis must clear to be deep-hunted.
 min_payout_band: P3
 
+# Max Tier 1 hunters in flight during the parallel sweep (Stage 3). Default 5.
+sweep_concurrency: 5
+
 # Runaway-protection budgets. Generous defaults; the engagement halts cleanly
 # when any one threshold is hit.
 budget:
