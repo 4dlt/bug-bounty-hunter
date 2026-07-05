@@ -15,6 +15,8 @@ Markdown prompts for the v2 agent roles live here, added slice by slice:
 - Tier 2 deep hunters (Stage 6) — `deep-hunter.md` ✅ (Slice 6)
 - Report + Resume + Budget halt (Stage 6 report, resume, runaway protection) —
   no agent prompt (deterministic) ✅ (Slice 7)
+- IDOR hunting playbook (Phase 1 · Slice 2) — `idor-playbook.md` ✅ (the capable
+  LLM IDOR hunter's methodology / system context)
 
 Slice 0 shipped the scaffolding, LLM client, state machine, rate-limit
 governor, and Juice Shop test target. Slice 1 adds Stage 0: the scope.yaml
@@ -160,3 +162,41 @@ writing a runnable PoC + oracle differential, the oracle-wired verifier, and the
 full verify loop confirming a true IDOR while escalating an unconfirmable one.
 The live `bbh pentest http://localhost:3000` run against Juice Shop still needs a
 host with docker; the tracer wiring is intact behind the identities gate.
+
+## Phase 1 · Slice 2 — Capable LLM IDOR hunter (http_request + bash)
+
+Slice 2 replaces Slice 1's *hardcoded* probe with a real model that **discovers**
+the bug itself, dropping into the same transport + oracle pipeline. Two new
+pieces plus a hand-written playbook.
+
+- **Agent tool-loop primitive** (`src/agent/tool-loop.ts`). `runToolLoop` is the
+  one new orchestration primitive: a bounded multi-turn tool-use loop over the
+  LLM client. Given a system prompt, tools (name + description + JSON-schema +
+  handler), a turn cap, and a designated TERMINAL tool, it runs the model,
+  dispatches each `tool_use` to its handler, feeds the result back as a
+  `tool_result`, and returns the terminal tool's input the moment the model calls
+  it. It honours the turn cap and counts every model invocation via `onLlmCall`
+  (the `max_llm_calls` budget hook). The client is injected structurally, so the
+  loop is unit-tested with a scripted fake (`tests/tool-loop.test.ts`).
+- **The capable LLM IDOR hunter** (`src/idor/llm-hunter.ts`). A `HunterRunner`
+  built on the loop, given a full toolset — deliberately NOT one tool:
+  `http_request` (the identity/unauth-aware probe path, routed through `ctx.fire`
+  so scope / rate-limit / dedupe / ledger hold by construction), `bash` (general
+  shell for JWT-decode, `jq`, discovery tools, scratch scripts — injected as a
+  `BashExecutor`), and the terminal `submit_findings`. Its system prompt is the
+  injected IDOR playbook (`idor-playbook.md`) plus the cell context. The model
+  reports each candidate's differential (endpoint, leaked `victim_marker`,
+  attacking identity, and BOTH the attacker + unauth responses); the hunter builds
+  the Slice-1 finding shape from it (`candidateToFinding` → `buildIdorFinding`), so
+  the self-checking `poc.sh` + `evidence/oracle.json` are identical to Slice 1 and
+  the **unchanged oracle** stays the sole confirmation gate. Unconfirmed leads
+  ride along as `hypotheses`.
+
+`src/main.ts` wires the LLM hunter into the sweep behind the same identities gate
+(replacing `createIdorHunterRunner`); each hunter LLM call increments the
+`BudgetTracker`. Offline seam tests (`tests/tool-loop.test.ts`,
+`tests/idor-llm-hunter.test.ts`) drive the loop + hunter with a scripted fake
+client through the real transport and assert an oracle-confirmable finding, the
+turn cap, the LLM-call count, and the tool wiring. The live
+`bbh pentest http://localhost:3000` acceptance (the model finding + proving an
+IDOR unassisted) still needs a host with docker + credentials.
