@@ -59,6 +59,53 @@ v3.2-patch fixes this with three architectural changes:
 
 Backed by 22 smoke tests including end-to-end regression against the Apr-18 fixture (10 in, 0 validated, 0 fake bounties).
 
+## v2 (in development)
+
+v2 replaces the v1 bash/markdown skill with a TypeScript orchestrator built
+around a **self-verifying loop** (plan -> execute -> verify -> repeat) with
+three separated LLM roles (Author, Reviewer, Verifier). It lives under `v2/`
+and is being built slice by slice — see the tracking issues on GitHub. It has
+**no dependency on PAI** or any personal-infrastructure repo.
+
+### Install (v2)
+
+```bash
+# 1. Runtime — Bun (Node-compatible)
+curl -fsSL https://bun.sh/install | bash
+
+# 2. Orchestrator dependencies
+cd v2/orchestrator && bun install   # or: npm install
+
+# 3. Credentials — pick ONE:
+#    a) Subscription billing (preferred) — creates CLAUDE_CODE_OAUTH_TOKEN:
+claude setup-token
+#    b) API billing:
+export ANTHROPIC_API_KEY=sk-ant-...
+
+# 4. Test target — local OWASP Juice Shop:
+docker compose -f v2/test-target/docker-compose.yml up -d   # reachable at http://localhost:3000
+docker compose -f v2/test-target/docker-compose.yml down
+```
+
+### Smoke test (v2)
+
+```bash
+# Boots Juice Shop, makes one LLM call, writes+validates state.json, tears down.
+bun v2/orchestrator/src/main.ts hello
+```
+
+The `hello` command brings the test target up and down automatically. From
+inside Claude Code, the `BugBountyHunter-v2` skill triggers the same binary
+from a natural-language request (e.g. "pentest target.com").
+
+### Develop (v2)
+
+```bash
+cd v2/orchestrator
+npm run typecheck   # tsc --noEmit
+npm run test        # vitest
+```
+
 ## Prerequisites
 
 - [Claude Code](https://claude.ai/claude-code) CLI installed and authenticated

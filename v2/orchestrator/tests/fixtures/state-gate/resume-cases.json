@@ -1,0 +1,39 @@
+{
+  "note": "Artifact snapshots that drive the stage-gate resume seam tests. `full` has every stage's primary artifact on disk (report withheld — an in-flight engagement has not reported yet), so a resume into ANY stage is clean. `missing_recon` drops the recon artifacts, so a resume into any stage AT OR AFTER plan is inconsistent.",
+  "full": {
+    "hasAuthState": true,
+    "hasReconEndpoints": true,
+    "hasReconSurfaces": true,
+    "hasHuntPlan": true,
+    "hasCoverage": true,
+    "findingsCount": 3,
+    "checklistCount": 2,
+    "approvalCount": 2,
+    "verdictPasses": 1,
+    "hasReport": false
+  },
+  "missing_recon": {
+    "hasAuthState": true,
+    "hasReconEndpoints": false,
+    "hasReconSurfaces": false,
+    "hasHuntPlan": true,
+    "hasCoverage": true,
+    "findingsCount": 3,
+    "checklistCount": 2,
+    "approvalCount": 2,
+    "verdictPasses": 1,
+    "hasReport": false
+  },
+  "no_candidates": {
+    "hasAuthState": true,
+    "hasReconEndpoints": true,
+    "hasReconSurfaces": true,
+    "hasHuntPlan": true,
+    "hasCoverage": true,
+    "findingsCount": 0,
+    "checklistCount": 0,
+    "approvalCount": 0,
+    "verdictPasses": 1,
+    "hasReport": false
+  }
+}

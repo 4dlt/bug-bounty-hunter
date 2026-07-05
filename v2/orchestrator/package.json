@@ -1,0 +1,25 @@
+{
+  "name": "bbh-orchestrator",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "BugBountyHunter v2 orchestrator — self-verifying pentest loop",
+  "bin": {
+    "bbh": "src/main.ts"
+  },
+  "scripts": {
+    "bbh": "bun src/main.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.70.0",
+    "yaml": "^2.9.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.0",
+    "typescript": "^5.6.0",
+    "vitest": "^3.0.0"
+  }
+}

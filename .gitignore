@@ -1,0 +1,4 @@
+node_modules/
+
+# local engagement scope — holds throwaway test-account creds, never committed
+scope.yaml

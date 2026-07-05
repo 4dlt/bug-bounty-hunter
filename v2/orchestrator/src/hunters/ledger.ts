@@ -1,0 +1,169 @@
+// Engagement memory — the append-only `ledger.jsonl` and the dedupe primitive.
+//
+// Every probe a hunter fires is appended to `ledger.jsonl` (PRD user story 21:
+// an in-flight engagement is observable and resumable). The dedupe primitive
+// `isDuplicateProbe` — keyed on the 3-tuple `(endpoint, payload_sig, session)`
+// (user story 22) — is the repeat-prevention half of the "iterations expand,
+// not repeat" invariant: a hunter MUST check it before firing any novel probe,
+// so 10 iterations on one hypothesis explore 10 variants rather than the same
+// probe 10 times. The Verifier's re-fire path deliberately bypasses this check
+// (it lives in a different code path — re-firing a known PoC is the point).
+//
+// This is one of the PRD's three named testing seams: a pure, table-driven
+// function over a candidate probe + an existing ledger -> duplicate | novel.
+
+import { promises as fs } from "node:fs";
+import path from "node:path";
+import { createHash } from "node:crypto";
+import { z } from "zod";
+
+// ---------------------------------------------------------------------------
+// Payload signatures
+// ---------------------------------------------------------------------------
+
+/** Deterministic JSON with sorted object keys, so a payload's sig is stable. */
+function stableStringify(value: unknown): string {
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(",")}]`;
+  const entries = Object.entries(value as Record<string, unknown>)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([k, v]) => `${JSON.stringify(k)}:${stableStringify(v)}`);
+  return `{${entries.join(",")}}`;
+}
+
+/**
+ * A content signature for a payload. Deterministic (no clock/random): the same
+ * payload always yields the same sig, and any mutation yields a different one —
+ * which is exactly what makes a mutated retry read as *novel* to the dedupe
+ * primitive while an exact repeat reads as a *duplicate*. A string payload is
+ * hashed verbatim; an object is canonicalised (sorted keys) first so key order
+ * does not change the sig.
+ */
+export function payloadSig(payload: unknown): string {
+  const canonical =
+    typeof payload === "string" ? payload : stableStringify(payload);
+  return "sig:" + createHash("sha256").update(canonical).digest("hex").slice(0, 16);
+}
+
+// ---------------------------------------------------------------------------
+// Ledger schema
+// ---------------------------------------------------------------------------
+
+/** The outcome of firing one probe. `resp_sig` fingerprints the response body
+ *  so the verifier can compare shapes; `trigger_match` flags a vuln signal. */
+export const LedgerResultSchema = z.object({
+  status: z.string().min(1),
+  resp_sig: z.string().optional(),
+  trigger_match: z.boolean().default(false),
+  evidence: z.string().optional(),
+});
+export type LedgerResult = z.infer<typeof LedgerResultSchema>;
+
+/**
+ * Probe context. `session` is the account/identity the probe fired under and is
+ * the third leg of the dedupe key — the same payload under a *different* session
+ * is a legitimately novel probe (cross-tenant IDOR testing). Extra context keys
+ * (e.g. `waf`) are carried verbatim but do NOT affect the dedupe key.
+ */
+export const LedgerContextSchema = z
+  .object({ session: z.string().min(1) })
+  .catchall(z.unknown());
+export type LedgerContext = z.infer<typeof LedgerContextSchema>;
+
+/** One row of `ledger.jsonl`: a single fired probe. */
+export const LedgerEntrySchema = z.object({
+  ts: z.string().min(1),
+  pass: z.number().int().nonnegative(),
+  agent: z.string().min(1),
+  surface: z.string().min(1),
+  endpoint: z.string().min(1),
+  method: z.string().default("GET"),
+  class: z.string().min(1),
+  payload_id: z.string().min(1),
+  payload_sig: z.string().min(1),
+  context: LedgerContextSchema,
+  result: LedgerResultSchema,
+});
+export type LedgerEntry = z.infer<typeof LedgerEntrySchema>;
+
+// ---------------------------------------------------------------------------
+// Dedupe primitive (pure)
+// ---------------------------------------------------------------------------
+
+/** The 3-tuple that identifies a probe for dedupe: (endpoint, payload_sig, session). */
+export interface ProbeKey {
+  endpoint: string;
+  payload_sig: string;
+  session: string;
+}
+
+/** NUL-joined key string; NUL cannot appear in any of the three fields. */
+export function probeDedupeKey(p: ProbeKey): string {
+  return `${p.endpoint}\u0000${p.payload_sig}\u0000${p.session}`;
+}
+
+/** Pull the dedupe key out of a full ledger entry. */
+export function ledgerEntryKey(e: LedgerEntry): ProbeKey {
+  return {
+    endpoint: e.endpoint,
+    payload_sig: e.payload_sig,
+    session: e.context.session,
+  };
+}
+
+/**
+ * Is `probe` a duplicate of something already in `ledger`? True only when an
+ * existing entry matches on ALL THREE of (endpoint, payload_sig, session).
+ * Consequences the table-driven tests pin down:
+ *   - same payload, different session  -> novel     (cross-account retry)
+ *   - mutated payload (new payload_sig) -> novel     (expanded probe space)
+ *   - exact repeat                      -> duplicate  (wasted probe)
+ *   - same 3-tuple, different WAF/context -> duplicate (context is not keyed)
+ * The Verifier's re-fire path does not call this — re-firing a known PoC is
+ * intentional, so it lives in a separate code path.
+ */
+export function isDuplicateProbe(
+  probe: ProbeKey,
+  ledger: LedgerEntry[],
+): boolean {
+  const key = probeDedupeKey(probe);
+  return ledger.some((e) => probeDedupeKey(ledgerEntryKey(e)) === key);
+}
+
+// ---------------------------------------------------------------------------
+// Persistence
+// ---------------------------------------------------------------------------
+
+export function ledgerPath(workdir: string): string {
+  return path.join(workdir, "ledger.jsonl");
+}
+
+/**
+ * Append one probe to `ledger.jsonl`. Append-only and lock-free: parallel
+ * hunters can each append without coordinating, exactly as `hypotheses.jsonl`
+ * and `coverage-gaps.jsonl` do. Validates before writing so a malformed row can
+ * never land in the log.
+ */
+export async function appendLedger(
+  workdir: string,
+  entry: LedgerEntry,
+): Promise<void> {
+  const validated = LedgerEntrySchema.parse(entry);
+  await fs.mkdir(workdir, { recursive: true });
+  await fs.appendFile(ledgerPath(workdir), JSON.stringify(validated) + "\n", "utf8");
+}
+
+/** Read + parse `ledger.jsonl`. A missing file yields an empty ledger. */
+export async function readLedger(workdir: string): Promise<LedgerEntry[]> {
+  let raw: string;
+  try {
+    raw = await fs.readFile(ledgerPath(workdir), "utf8");
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw err;
+  }
+  return raw
+    .split("\n")
+    .filter((line) => line.trim().length > 0)
+    .map((line) => LedgerEntrySchema.parse(JSON.parse(line)));
+}

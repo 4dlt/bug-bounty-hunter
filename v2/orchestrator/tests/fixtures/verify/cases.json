@@ -1,0 +1,14 @@
+{
+  "checklist_class": "idor",
+  "comment": "Verify-loop seam fixtures: one pre-built finding per verdict. The stub Verifier emits `verdict`/`next_step` verbatim (standing in for the LLM's judgment); the seam test asserts the orchestrator routes each to `expect_action`. Covers all 8 verdicts + both re-queue paths (surgical, promote_to_tier2).",
+  "cases": [
+    { "id": "f-0001", "title": "cross-tenant user record via /api/Users/{id}", "severity": "high", "verdict": "confirmed", "reason": "cross_tenant_confirmed", "expect_action": "promote" },
+    { "id": "f-0002", "title": "id decrement no longer returns other user", "severity": "medium", "verdict": "repro_failed", "reason": "refire_returned_403", "mutation_hint": "try adjacent ids and a captured victim UUID", "next_step": "surgical", "expect_action": "requeue" },
+    { "id": "f-0003", "title": "200 vs 403 diff, no private data shown", "severity": "medium", "verdict": "weak_evidence", "reason": "no_private_data_gate", "mutation_hint": "capture a field private to the victim tenant", "next_step": "promote_to_tier2", "expect_action": "requeue" },
+    { "id": "f-0004", "title": "hit on a documented-out-of-scope host", "severity": "low", "verdict": "out_of_scope", "reason": "documented_exclusion", "expect_action": "drop" },
+    { "id": "f-0005", "title": "same object as an already-confirmed finding", "severity": "high", "verdict": "duplicate", "reason": "dup_of_f-0001", "expect_action": "merge" },
+    { "id": "f-0006", "title": "reachable but only self-owned data", "severity": "high", "verdict": "severity_mismatch", "reason": "impact_lower_than_claimed", "expect_action": "downgrade" },
+    { "id": "f-0007", "title": "refire flaps between 200 and 500", "severity": "medium", "verdict": "non_deterministic", "reason": "flapping_refire", "expect_action": "escalate" },
+    { "id": "f-0008", "title": "refire throttled by the target", "severity": "medium", "verdict": "rate_limited", "reason": "429_on_refire", "expect_action": "backoff" }
+  ]
+}
