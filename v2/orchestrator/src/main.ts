@@ -8,7 +8,7 @@
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { complete, createClient } from "./llm.ts";
+import { complete } from "./llm.ts";
 import {
   initialState,
   readState,
@@ -31,11 +31,11 @@ import {
   isAuthenticatedSession,
   type IdentitySession,
 } from "./idor/transport.ts";
+import { loadIdorPlaybook } from "./idor/llm-hunter.ts";
 import {
-  createLlmIdorHunterRunner,
-  loadIdorPlaybook,
-  spawnBashExecutor,
-} from "./idor/llm-hunter.ts";
+  createClaudeIdorHunterRunner,
+  spawnClaudeAgent,
+} from "./idor/claude-agent.ts";
 import { createOracleVerifierRunner } from "./idor/oracle-verifier.ts";
 import { buildTracerSpecs, TRACER_SURFACE } from "./idor/tracer.ts";
 import {
@@ -854,15 +854,16 @@ async function pentest(args: string[]): Promise<void> {
     // Stage 3 — Tier 1 parallel sweep. Runs a hunter per (surface × class) cell
     // (bounded by scope.sweep_concurrency), appending probes to ledger.jsonl +
     // writing findings/<id>/, seeding reactive hypotheses, deriving coverage.json,
-    // advancing sweep -> author. In tracer mode the IDOR cell gets the CAPABLE LLM
-    // hunter (Slice 2): a real model on the agent tool-loop with http_request +
-    // bash + the injected playbook, discovering the bug through the real HTTP
-    // transport. Each LLM call counts against the engagement's max_llm_calls.
+    // advancing sweep -> author. In tracer mode the IDOR cell gets the CAPABLE
+    // hunter (Slice 3): a first-party `claude` agent spawned per cell (premium
+    // models on the subscription, no 429), briefed with the playbook + captured
+    // identity tokens + endpoints, probing with its OWN bash/curl and emitting the
+    // candidate JSON contract. Each agent spawn counts against max_llm_calls.
     const tracerTransport = tracerMode
       ? createHttpTransport({ scope, sessions: sessions!, onCoverageGap: reportGap })
       : undefined;
     const idorPlaybook = tracerMode ? await loadIdorPlaybook() : "";
-    const hunterClient = tracerMode ? createClient() : null;
+    const claudeAgent = tracerMode ? spawnClaudeAgent(workdir) : null;
     state = await runSweepStage(
       workdir,
       scope,
@@ -873,12 +874,11 @@ async function pentest(args: string[]): Promise<void> {
         ? {
             runnerFor: (cell) =>
               cell.vuln_class === "idor"
-                ? createLlmIdorHunterRunner({
-                    client: hunterClient!,
+                ? createClaudeIdorHunterRunner({
+                    agent: claudeAgent!,
                     sessions: sessions!,
                     base: scope.target,
                     playbook: idorPlaybook,
-                    bash: spawnBashExecutor(workdir),
                     onLlmCall: () => budgetTracker.recordLlmCall(),
                   })
                 : hunterStub,

@@ -200,3 +200,44 @@ client through the real transport and assert an oracle-confirmable finding, the
 turn cap, the LLM-call count, and the tool wiring. The live
 `bbh pentest http://localhost:3000` acceptance (the model finding + proving an
 IDOR unassisted) still needs a host with docker + credentials.
+
+## Phase 1 · Slice 3 — Run agents on the subscription tier (first-party `claude` agent)
+
+Slice 3 **supersedes Slice 2's direct-SDK tool-loop execution**. The workflow must
+run on the Claude *subscription* (hard requirement — no pay-as-you-go key), but
+Anthropic anti-abuse-gates Sonnet/Opus with a `429` when a subscription OAuth token
+hits `/v1/messages` directly; the same token reaches premium models fine through the
+first-party `claude` CLI. So the IDOR hunter is restructured as ONE `claude` agent
+spawned per cell instead of an SDK tool-loop.
+
+- **The `claude`-agent IDOR hunter** (`src/idor/claude-agent.ts`). A `HunterRunner`
+  that spawns `claude --print --model <model> --output-format json
+  --dangerously-skip-permissions -p -`, piping the whole brief over stdin. The
+  brief = the injected IDOR playbook + engagement context: target base URL, the
+  captured identity session tokens (so the agent can
+  `curl -H "Authorization: Bearer …"`), the id-bearing endpoints, and the unauth
+  option. The agent is the "capable agent" — it probes with its OWN `bash`/`curl`,
+  not one wired tool. It ends by emitting the EXISTING candidate JSON contract
+  (`SubmitFindingsSchema`), which the runner extracts (`extractSubmitJson`, robust
+  to prose / fenced blocks / braces-in-strings) and feeds through the **unchanged**
+  `candidateToFinding` → `buildIdorFinding` → oracle → verify → report path. The
+  model discovers; the code proves. Malformed/empty agent output yields no findings
+  (graceful, never a crash).
+- **The injectable seam** — the `claude` invocation is a `ClaudeAgentRunner`
+  (mirroring `BashExecutor` / `PocExecutor` / `MessagesClient`); the default
+  `spawnClaudeAgent` shells out with the ambient `CLAUDE_CODE_OAUTH_TOKEN` (the CLI
+  carries the first-party identity, so premium is served on the subscription).
+  Offline tests (`tests/idor-claude-agent.test.ts`) drive it with a fake runner
+  returning canned agent output and assert an oracle-confirmable finding, the
+  premium model choice, the token-bearing brief, graceful handling of malformed /
+  throwing / empty-findings output, and the JSON extraction edge cases — no live
+  `claude`, no network.
+
+`src/main.ts` wires the `claude` hunter into the sweep behind the same identities
+gate (replacing `createLlmIdorHunterRunner`); each agent spawn increments the
+`BudgetTracker`. The direct-SDK premium path is removed for the hunter; probes fired
+by the agent's `bash` bypass the in-process ledger (accepted this phase). Slice 2's
+`llm-hunter.ts` stays as a library — its `candidateToFinding` + `SubmitFindingsSchema`
+are reused. The live subscription acceptance (`bbh pentest http://localhost:3000`
+finding + oracle-proving an IDOR on Juice Shop via Sonnet/Opus) still needs a host
+with docker + credentials.
