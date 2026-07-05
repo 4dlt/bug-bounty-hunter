@@ -111,16 +111,17 @@ export function runIdorOracle(obs: IdorObservation): IdorOracleVerdict {
   const confirmed = attacker_read_ok && victim_data_leaked && unauth_denied;
 
   if (confirmed) {
-    // A hard unauthenticated deny (non-2xx) is stronger proof of an access-control
+    // A hard unauthenticated deny (4xx/5xx) is stronger proof of an access-control
     // boundary than a soft one (2xx but the marker absent), so it rates higher.
-    const confidence: Confidence = obs.unauth.status >= 400 ? "high" : "medium";
+    const unauthHardDeny = obs.unauth.status >= 400;
+    const confidence: Confidence = unauthHardDeny ? "high" : "medium";
     return {
       confirmed: true,
       confidence,
       reason:
         `cross-tenant IDOR: private field "${obs.private_field}" leaked to the ` +
         `attacking identity (victim marker present) and ` +
-        (obs.unauth.status >= 400
+        (unauthHardDeny
           ? `denied unauthenticated (HTTP ${obs.unauth.status}).`
           : `absent unauthenticated (HTTP ${obs.unauth.status}, marker not returned).`),
       signals,

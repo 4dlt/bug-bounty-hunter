@@ -27,7 +27,7 @@ import {
   decodeProbeEvidence,
   type IdentitySession,
 } from "./transport.ts";
-import type { IdorObservation } from "./oracle.ts";
+import type { DifferentialResponse, IdorObservation } from "./oracle.ts";
 
 /**
  * One hardcoded cross-tenant probe: read `endpoint` (a victim's object) as the
@@ -52,7 +52,7 @@ export const IdorProbeSpecSchema = z.object({
 export type IdorProbeSpec = z.infer<typeof IdorProbeSpecSchema>;
 
 /** Body + status a fired probe returned (decoded from the ledger evidence). */
-function readResponse(fire: FireResult): { status: number; body: string } {
+function readResponse(fire: FireResult): DifferentialResponse {
   if (!fire.fired) return { status: 0, body: "" };
   return decodeProbeEvidence(fire.result.evidence);
 }
@@ -110,8 +110,8 @@ export function buildIdorFinding(
   spec: IdorProbeSpec,
   base: string,
   attackerSession: IdentitySession | undefined,
-  attacker: { status: number; body: string },
-  unauth: { status: number; body: string },
+  attacker: DifferentialResponse,
+  unauth: DifferentialResponse,
 ): HunterFinding {
   const observation: IdorObservation = {
     private_field: spec.private_field,
