@@ -40,7 +40,6 @@ import type { Level } from "../llm.ts";
 import { runToolLoop, type AgentTool, type MessagesClient } from "../agent/tool-loop.ts";
 import { IdorProbeSpecSchema, buildIdorFinding } from "./probe.ts";
 import { decodeProbeEvidence, type IdentitySession } from "./transport.ts";
-import type { DifferentialResponse } from "./oracle.ts";
 
 // ---------------------------------------------------------------------------
 // The bash tool seam
@@ -278,9 +277,13 @@ export function candidateToFinding(
     attacker_marker: candidate.attacker_marker,
     severity: candidate.severity,
   });
-  const attacker: DifferentialResponse = candidate.attacker_response;
-  const unauth: DifferentialResponse = candidate.unauth_response;
-  return buildIdorFinding(spec, base, sessions.get(candidate.attacker_identity), attacker, unauth);
+  return buildIdorFinding(
+    spec,
+    base,
+    sessions.get(candidate.attacker_identity),
+    candidate.attacker_response,
+    candidate.unauth_response,
+  );
 }
 
 // ---------------------------------------------------------------------------
