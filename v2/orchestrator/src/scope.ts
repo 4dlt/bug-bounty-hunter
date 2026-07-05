@@ -41,6 +41,21 @@ export const AuthSchema = z
   .prefault({});
 export type Auth = z.infer<typeof AuthSchema>;
 
+/**
+ * A named test identity for a multi-identity engagement (PRD user stories 3-4).
+ * Cross-tenant classes (IDOR) need ≥2 identities so identity A can reach identity
+ * B's objects; an engagement declares as many as it needs (0 / 1 / 2+). The
+ * implicit unauthenticated identity is always available and is NOT declared here.
+ */
+export const IdentitySchema = z.object({
+  name: z.string().min(1),
+  username: z.string().min(1),
+  password: z.string().min(1),
+  // Per-identity login endpoint; falls back to the engagement `auth.login_url`.
+  login_url: z.string().optional(),
+});
+export type Identity = z.infer<typeof IdentitySchema>;
+
 export const ScopeSchema = z.object({
   target: z.string().min(1),
   // In-scope host globs. Empty => derive from the target host (see
@@ -49,6 +64,9 @@ export const ScopeSchema = z.object({
   // Out-of-scope host globs. Always take precedence over `scope`.
   out_of_scope: z.array(z.string()).default([]),
   auth: AuthSchema,
+  // Named test identities. Cross-tenant hunting needs ≥2; an unauthenticated
+  // identity is always implicitly available on top of these.
+  identities: z.array(IdentitySchema).default([]),
   min_payout_band: z.string().default("P3"),
   // Max Tier 1 hunters in flight during the parallel sweep (Stage 3). Tunable
   // per engagement; the default follows the PRD's 5-hunters-in-flight cap.

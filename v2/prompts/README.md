@@ -116,3 +116,47 @@ fixtures under `tests/fixtures/state-gate/`) cover report contents (confirmed
 only + a separate ready-for-human section, no bounty), resume from each of the 8
 stages, the checklist-rejection operator artifact, a clean budget halt with a
 partial report, and the in-flight-stage re-run NOT double-firing probes.
+
+## Phase 1 · Slice 1 — End-to-end IDOR tracer + differential oracle (no LLM)
+
+The first Phase-1 slice replaces the stubs on the critical path with the
+smallest real hunting thread that produces a *proven* finding — a tracer bullet
+that lights up auth, transport, hunter, oracle, verifier, and report at once,
+with **zero LLM calls**. It activates whenever `scope.yaml` declares ≥2 named
+identities.
+
+- **Multi-identity auth + real HTTP transport** (`src/idor/transport.ts`).
+  `captureSessions` performs a real form/JSON login for each declared identity
+  (best-effort register, then login), keyed by name, plus the always-available
+  implicit unauthenticated identity; every request routes through the scoped
+  fetch. `createHttpTransport` is the `ProbeTransport` the hunter fires through:
+  it resolves each probe against the target base, injects the chosen identity's
+  credential (or none), routes through the SAME scoped fetch behind the existing
+  dedupe + token + ledger firer, and returns status / body / timing. The network
+  is injected as `fetch`, so both are unit-testable offline.
+- **The pure IDOR differential oracle** (`src/idor/oracle.ts`). `runIdorOracle`
+  is a pure function over a differential (the victim object read as the attacker
+  vs unauthenticated): it CONFIRMS only when the victim's private marker leaked
+  to the attacker AND was denied/absent unauthenticated — a true cross-tenant
+  leak, not public-by-design and not the attacker's own data. It labels
+  confidence (hard unauth deny = high, soft = medium) and NEVER drops a finding:
+  a non-confirmation is a labelled verdict, not a discard.
+- **The hardcoded IDOR probe** (`src/idor/probe.ts`, `src/idor/tracer.ts`).
+  `createIdorHunterRunner` fires each victim object as the attacker and
+  unauthenticated through `ctx.fire`, and on a successful cross-tenant read emits
+  a candidate finding with a self-checking `poc.sh` (exits non-zero unless the
+  cross-tenant read AND the unauth-deny both hold) and an `evidence/oracle.json`
+  differential. `buildTracerSpecs` is the trivial hardcoded "recon + plan": one
+  cross-tenant spec per (attacker, victim) × id-bearing endpoint.
+- **The Verifier wired to the oracle** (`src/idor/oracle-verifier.ts`).
+  `createOracleVerifierRunner` reads `evidence/oracle.json`, runs the oracle, and
+  emits `confirmed` iff it passes — otherwise `weak_evidence`, which the verify
+  loop surfaces (escalated ready-for-human at the cap), never drops. "Confirmed"
+  is a mechanical fact, not an LLM opinion.
+
+The offline seam tests (`tests/idor.test.ts`) cover the oracle decision table,
+the transport (injected fetch + scope block), multi-identity auth, the hunter
+writing a runnable PoC + oracle differential, the oracle-wired verifier, and the
+full verify loop confirming a true IDOR while escalating an unconfirmable one.
+The live `bbh pentest http://localhost:3000` run against Juice Shop still needs a
+host with docker; the tracer wiring is intact behind the identities gate.

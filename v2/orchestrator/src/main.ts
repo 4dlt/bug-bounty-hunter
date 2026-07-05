@@ -26,6 +26,15 @@ import {
 } from "./scope.ts";
 import { acquireAuth, type LoginOutcome } from "./auth.ts";
 import {
+  captureSessions,
+  createHttpTransport,
+  isAuthenticatedSession,
+  type IdentitySession,
+} from "./idor/transport.ts";
+import { createIdorHunterRunner } from "./idor/probe.ts";
+import { createOracleVerifierRunner } from "./idor/oracle-verifier.ts";
+import { buildTracerSpecs, TRACER_SURFACE } from "./idor/tracer.ts";
+import {
   runRecon,
   type ReconAgentContext,
   type ReconResult,
@@ -33,6 +42,7 @@ import {
 import {
   runPlan,
   readHuntPlan,
+  writeHuntPlan,
   appendHypotheses,
   HypothesisSchema,
   type PlanInput,
@@ -166,6 +176,32 @@ async function browserLogin(_scope: Scope): Promise<LoginOutcome> {
 }
 
 /**
+ * Convert the captured multi-identity sessions into an auth LoginOutcome so the
+ * existing `auth` gate (which requires captured session material) works
+ * unchanged: every bearer credential becomes a JWT in `auth/state.json`. A run
+ * where no identity authenticated fails auth, exactly as a stubbed login does.
+ */
+function sessionsToLoginOutcome(
+  sessions: Map<string, IdentitySession>,
+  now: () => string,
+): LoginOutcome {
+  const authed = [...sessions.values()].filter(isAuthenticatedSession);
+  if (authed.length === 0) {
+    return { status: "failed", reason: "no declared identity authenticated" };
+  }
+  return {
+    status: "success",
+    artifact: {
+      acquired_at: now(),
+      cookies: [],
+      jwts: authed
+        .filter((s) => s.authorization)
+        .map((s) => ({ name: s.name, token: s.authorization!.replace(/^Bearer /, "") })),
+    },
+  };
+}
+
+/**
  * Run one recon agent (R1-R4). Delegated to the spawned agent driven by
  * `v2/prompts/recon-r{1..4}-*.md`, which crawls / scans / analyses through the
  * scope-enforced fetch and the governor's token endpoint — not wired in this
@@ -247,18 +283,20 @@ async function runSweepStage(
   state: State,
   takeToken: () => Promise<boolean>,
   reportGap: (gap: CoverageGap) => void,
+  overrides: { runnerFor?: (cell: { vuln_class: string }) => HunterRunner; transport?: ProbeTransport } = {},
 ): Promise<State> {
   const cells = await readHuntPlan(workdir).catch(() => []);
 
   const outcome = await runSweep(workdir, {
     scope,
     cells,
-    // Every cell gets the same stub agent this slice; runSweep gaps a cell whose
+    // Every cell gets the same stub agent this slice unless the caller injects a
+    // real runner (the Phase-1 IDOR tracer does); runSweep gaps a cell whose
     // class has no prompt on disk. The real wiring resolves a Sonnet agent per
     // class from `hunters/<class>.md`.
-    runnerFor: () => hunterStub,
+    runnerFor: overrides.runnerFor ?? (() => hunterStub),
     payloadsFor: (cell) => payloadsForClass(cell.vuln_class),
-    transport: stubTransport,
+    transport: overrides.transport ?? stubTransport,
     pass: state.current_pass,
     takeToken,
     onCoverageGap: reportGap,
@@ -441,10 +479,11 @@ async function runVerifyStageDriver(
   state: State,
   execute: PocExecutor,
   budgetTracker?: BudgetTracker,
+  verifierRunner: VerifierRunner = verifierStub,
 ): Promise<State> {
   const outcome = await runVerifyStage(workdir, {
     scope,
-    verifierRunner: verifierStub,
+    verifierRunner,
     execute,
     reDispatch: reDispatchStub,
     promoteToTier2: promoteToTier2Driver(workdir, scope),
@@ -733,7 +772,23 @@ async function pentest(args: string[]): Promise<void> {
     void logGap(gap);
     console.error(`[pentest] coverage_gap: ${gap.reason}`);
   };
-  const plan = await acquireAuth(workdir, () => browserLogin(scope), {
+
+  // Phase-1 IDOR tracer: a multi-identity engagement (≥2 named identities) drives
+  // the hardcoded cross-tenant IDOR thread — real login, real HTTP probes, and
+  // the deterministic oracle — with ZERO LLM calls. A single-/no-identity
+  // engagement keeps the stubbed critical path (auth halts as before).
+  const tracerSpecs = buildTracerSpecs(scope);
+  const tracerMode = tracerSpecs.length > 0;
+  const sessions = tracerMode ? await captureSessions(scope, { onCoverageGap: reportGap }) : null;
+  if (tracerMode) {
+    const authed = [...sessions!.values()].filter(isAuthenticatedSession).length;
+    console.log(`[pentest] IDOR tracer: ${authed}/${scope.identities.length} identities authenticated`);
+  }
+
+  const login: () => Promise<LoginOutcome> = tracerMode
+    ? async () => sessionsToLoginOutcome(sessions!, () => new Date().toISOString())
+    : () => browserLogin(scope);
+  const plan = await acquireAuth(workdir, login, {
     onCoverageGap: reportGap,
   });
 
@@ -773,19 +828,48 @@ async function pentest(args: string[]): Promise<void> {
     );
 
     // Stage 2 — Plan. Reads the recon map and emits hunt-plan.json +
-    // a-priori hypotheses, advancing plan -> sweep.
-    state = await runPlanStage(workdir, scope, state);
+    // a-priori hypotheses, advancing plan -> sweep. In tracer mode the plan is
+    // hardcoded: one (api × idor) cell over the handed id-bearing endpoints.
+    if (tracerMode) {
+      await writeHuntPlan(workdir, [
+        {
+          surface: TRACER_SURFACE,
+          vuln_class: "idor",
+          relevant_endpoints: tracerSpecs.map((s) => s.endpoint),
+          priority: "high",
+          expected_payout_band: null,
+        },
+      ]);
+      state = transition(state, { type: "advance" });
+      await writeState(workdir, state);
+      console.log(`[pentest] tracer plan: 1 (api × idor) cell, ${tracerSpecs.length} endpoint(s) -> ${state.current_stage}`);
+    } else {
+      state = await runPlanStage(workdir, scope, state);
+    }
 
     // Stage 3 — Tier 1 parallel sweep. Runs a hunter per (surface × class) cell
     // (bounded by scope.sweep_concurrency), appending probes to ledger.jsonl +
     // writing findings/<id>/, seeding reactive hypotheses, deriving coverage.json,
-    // advancing sweep -> author.
+    // advancing sweep -> author. In tracer mode the IDOR cell gets the real
+    // hardcoded probe firing through the real HTTP transport.
+    const tracerTransport = tracerMode
+      ? createHttpTransport({ scope, sessions: sessions!, onCoverageGap: reportGap })
+      : undefined;
     state = await runSweepStage(
       workdir,
       scope,
       state,
       () => acquireToken(tokens.url),
       reportGap,
+      tracerMode
+        ? {
+            runnerFor: (cell) =>
+              cell.vuln_class === "idor"
+                ? createIdorHunterRunner(tracerSpecs, sessions!, scope.target)
+                : hunterStub,
+            transport: tracerTransport,
+          }
+        : {},
     );
 
     // Stages 3.5 + 3.6 — Checklist Author + Reviewer. The Author writes a
@@ -813,12 +897,16 @@ async function pentest(args: string[]): Promise<void> {
     // Skipped when the checklist stage halted (state left at `halted`).
     if (state.current_stage === "verify") {
       await budgetTracker.refresh();
+      // Tracer mode verifies with the deterministic IDOR oracle (no LLM): the
+      // candidate is `confirmed` iff the oracle mechanically reproduces the
+      // cross-tenant leak, else escalated/surfaced — never dropped.
       state = await runVerifyStageDriver(
         workdir,
         scope,
         state,
         spawnPocExecutor,
         budgetTracker,
+        tracerMode ? createOracleVerifierRunner() : verifierStub,
       );
     }
 

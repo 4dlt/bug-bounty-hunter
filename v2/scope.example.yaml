@@ -18,11 +18,23 @@ out_of_scope: []
 # method: "none" runs the engagement unauthenticated.
 auth:
   method: form
-  login_url: http://localhost:3000/#/login
+  login_url: /rest/user/login
   username: test@juice-sh.op
   password: "hunter2"
   # Optional substring proving login succeeded (page text / token name).
   success_check: bid
+
+# Named test identities (PRD user stories 3-4). ≥2 activates the Phase-1 IDOR
+# tracer: identity A probes identity B's objects cross-tenant. The implicit
+# unauthenticated identity is always available on top of these. A real HTTP
+# login (best-effort register, then login) captures each session, keyed by name.
+identities:
+  - name: alice
+    username: alice@juice-sh.op
+    password: "alice-pw-1"
+  - name: bob
+    username: bob@juice-sh.op
+    password: "bob-pw-2"
 
 # Minimum severity band a hypothesis must clear to be deep-hunted.
 min_payout_band: P3
