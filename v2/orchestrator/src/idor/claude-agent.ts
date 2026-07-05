@@ -30,16 +30,10 @@
 
 import { spawn } from "node:child_process";
 import { z } from "zod";
-import type {
-  HunterContext,
-  HunterFinding,
-  HunterRunner,
-  HunterYield,
-  ReactiveHypothesisInput,
-} from "../hunters/framework.ts";
+import type { HunterContext, HunterRunner, HunterYield } from "../hunters/framework.ts";
 import type { Level } from "../llm.ts";
 import { modelForLevel } from "../llm.ts";
-import { candidateToFinding, SubmitFindingsSchema } from "./llm-hunter.ts";
+import { submitFindingsToYield, SubmitFindingsSchema } from "./llm-hunter.ts";
 import { UNAUTH_SESSION, type IdentitySession } from "./transport.ts";
 
 // ---------------------------------------------------------------------------
@@ -323,14 +317,6 @@ export function createClaudeIdorHunterRunner(deps: ClaudeIdorHunterDeps): Hunter
     const parsed = SubmitFindingsSchema.safeParse(raw);
     if (!parsed.success) return { findings: [], hypotheses: [] };
 
-    const findings: HunterFinding[] = parsed.data.findings.map((c) =>
-      candidateToFinding(c, deps.sessions, deps.base),
-    );
-    const hypotheses: ReactiveHypothesisInput[] = parsed.data.hypotheses.map((h) => ({
-      target_endpoint: h.target_endpoint,
-      hypothesis: h.hypothesis,
-      signal_evidence: h.signal_evidence,
-    }));
-    return { findings, hypotheses };
+    return submitFindingsToYield(parsed.data, deps.sessions, deps.base);
   };
 }

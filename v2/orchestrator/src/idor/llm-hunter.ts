@@ -286,6 +286,26 @@ export function candidateToFinding(
   );
 }
 
+/** Turn a parsed `submit_findings` payload into the `HunterYield`: each candidate
+ *  through `candidateToFinding`, hypotheses passed through. Shared by both the
+ *  tool-loop hunter (Slice 2) and the `claude`-agent hunter (Slice 3) so the two
+ *  build their yield identically. */
+export function submitFindingsToYield(
+  payload: z.infer<typeof SubmitFindingsSchema>,
+  sessions: Map<string, IdentitySession>,
+  base: string,
+): HunterYield {
+  const findings: HunterFinding[] = payload.findings.map((c) =>
+    candidateToFinding(c, sessions, base),
+  );
+  const hypotheses: ReactiveHypothesisInput[] = payload.hypotheses.map((h) => ({
+    target_endpoint: h.target_endpoint,
+    hypothesis: h.hypothesis,
+    signal_evidence: h.signal_evidence,
+  }));
+  return { findings, hypotheses };
+}
+
 // ---------------------------------------------------------------------------
 // The hunter runner
 // ---------------------------------------------------------------------------
@@ -346,14 +366,6 @@ export function createLlmIdorHunterRunner(deps: LlmIdorHunterDeps): HunterRunner
     }
 
     const payload = SubmitFindingsSchema.parse(result.terminal);
-    const findings: HunterFinding[] = payload.findings.map((c) =>
-      candidateToFinding(c, deps.sessions, deps.base),
-    );
-    const hypotheses: ReactiveHypothesisInput[] = payload.hypotheses.map((h) => ({
-      target_endpoint: h.target_endpoint,
-      hypothesis: h.hypothesis,
-      signal_evidence: h.signal_evidence,
-    }));
-    return { findings, hypotheses };
+    return submitFindingsToYield(payload, deps.sessions, deps.base);
   };
 }
